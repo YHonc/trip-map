@@ -16,3 +16,12 @@ release/
 *.sqlite-*
 *.db
 *.db-*
+
+# Local agent instructions, prompts and development records
+AGENTS.md
+CLAUDE.md
+/*提示词*.md
+/计划与调试说明.md
+/*验收记录*.md
+.codex/
+.claude/
