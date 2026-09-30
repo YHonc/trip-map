@@ -85,6 +85,10 @@ export function validatePlannerData(value: unknown): ImportResult {
         return p.coordinateSystem as Place['coordinateSystem'];
       })() } : {}),
       ...(p.poiId !== undefined ? { poiId: id(p.poiId, `${path}.poiId`) } : {}),
+      ...(p.locationSource !== undefined ? { locationSource: (() => {
+        if (p.locationSource !== 'map-click' || p.provider !== 'amap' || p.coordinateSystem !== 'GCJ-02') fail(path, '地图选点来源无效');
+        return 'map-click' as const;
+      })() } : {}),
       ...(p.color !== undefined ? { color: color(p.color, COLORS[0], `${path}.color`) } : {}),
     };
   };

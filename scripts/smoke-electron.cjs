@@ -21,14 +21,15 @@ async function main() {
   let current;
   try {
     current = await launch();
-    await current.page.getByRole('button', { name: '编辑行程名称', exact: true }).click();
-    await current.page.getByRole('textbox', { name: '行程名称', exact: true }).fill('Electron 关闭保存核验');
+    await current.page.getByRole('button', { name: '切换或管理旅行计划', exact: true }).click();
+    await current.page.getByRole('button', { name: /^重命名计划：/ }).click();
+    await current.page.getByRole('textbox', { name: '计划名称', exact: true }).fill('Electron 关闭保存核验');
     await current.page.getByRole('button', { name: '保存', exact: true }).click();
     const exited = current.app.waitForEvent('close', { timeout: 30000 });
     await current.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
     await exited;
     current = await launch();
-    await current.page.getByRole('combobox', { name: '切换旅行计划' }).filter({ hasText: 'Electron 关闭保存核验' }).waitFor();
+    await current.page.getByRole('button', { name: '切换或管理旅行计划', exact: true }).filter({ hasText: 'Electron 关闭保存核验' }).waitFor();
     const response = await fetch(`http://127.0.0.1:${port}/api/plans`);
     assert.equal(response.status, 200);
     assert.equal((await response.json()).plans[0].trip.name, 'Electron 关闭保存核验');

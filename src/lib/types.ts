@@ -7,6 +7,7 @@ export interface Place extends Coordinate {
   provider?: 'mock' | 'amap' | 'unknown';
   coordinateSystem?: 'GCJ-02' | 'demo' | 'unknown';
   poiId?: string;
+  locationSource?: 'map-click';
   id: string;
   name: string;
   address: string;

@@ -1,5 +1,6 @@
 'use client';
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import dynamic from 'next/dynamic';
 import {
   closestCenter,
   DndContext,
@@ -20,17 +21,20 @@ import { DragData, DropData } from '@/lib/types';
 import { TripHeader } from './trip-header';
 import { Sidebar, StopCardPreview } from './sidebar';
 import { dayStopOffset } from '@/lib/planner';
-import { MapView } from './map/map-view';
 import { PlaceSearch } from './place-search';
 import { FavoriteDrawer } from './favorite-drawer';
 import { PlannerDialogs } from './planner-dialogs';
-import { TransferDialog } from './transfer-dialog';
-import { AIDialog } from './ai-dialog';
-import { CityDialog } from './city-dialog';
-import { PoiRepairDialog } from './poi-repair-dialog';
-import { MapSettings } from './map-settings';
 import { configureMap } from '@/services/map-service';
 import type { PublicMapConfig } from '@/lib/map-config';
+import { readLibrary, type SavedLibrary } from '@/services/plan-storage';
+import { loadAMap } from '@/services/amap-sdk';
+import { LoadingPanel } from './loading-panel';
+const MapView = dynamic(() => import('./map/map-view').then(module => module.MapView), { loading: () => <div className="map-loading-overlay"><LoadingPanel compact title="正在准备地图" detail="加载地图视图" completed={0} total={2} /></div> });
+const TransferDialog = dynamic(() => import('./transfer-dialog').then(module => module.TransferDialog));
+const AIDialog = dynamic(() => import('./ai-dialog').then(module => module.AIDialog));
+const CityDialog = dynamic(() => import('./city-dialog').then(module => module.CityDialog));
+const PoiRepairDialog = dynamic(() => import('./poi-repair-dialog').then(module => module.PoiRepairDialog));
+const MapSettings = dynamic(() => import('./map-settings').then(module => module.MapSettings));
 const collisionDetection: CollisionDetection = (args) => {
   const hits = pointerWithin(args);
   if (!hits.length) return args.pointerCoordinates ? [] : closestCenter(args);
@@ -55,14 +59,18 @@ const collisionDetection: CollisionDetection = (args) => {
 export function TripPlannerPage() {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState('');
+  const [completed, setCompleted] = useState(0);
+  const initialLibrary = useRef<Promise<SavedLibrary> | undefined>(undefined);
   useEffect(() => {
     let active = true;
-    void fetch('/api/amap/config', { cache: 'no-store' }).then(async response => { const config = await response.json(); if (!response.ok) throw new Error(config.error); return config as PublicMapConfig; }).then(config => { if (active) { configureMap(config); setLoaded(true); } }).catch(e => setError(e.message));
+    initialLibrary.current ??= readLibrary();
+    void initialLibrary.current.then(() => { if (active) setCompleted(1); }).catch(() => {});
+    void fetch('/api/amap/config', { cache: 'no-store', signal: AbortSignal.timeout(10000) }).then(async response => { const config = await response.json(); if (!response.ok) throw new Error(config.error); return config as PublicMapConfig; }).then(config => { if (active) { configureMap(config); if (config.provider === 'amap') void loadAMap().catch(() => {}); setLoaded(true); } }).catch(e => { if (active) setError(e.message); });
     return () => { active = false; };
   }, []);
-  if (!loaded) return <main className="startup-screen"><h1>多日行程地图</h1><p>{error || '正在打开本机数据…'}</p>{error && <button onClick={() => location.reload()}>重试</button>}</main>;
+  if (!loaded) return <main className="startup-screen"><LoadingPanel detail={completed ? '正在准备地图配置' : '正在读取本机计划与地图配置'} completed={completed} error={error} onRetry={() => location.reload()} /></main>;
   return (
-    <PlannerProvider>
+    <PlannerProvider initialLibrary={initialLibrary.current}>
       <PlannerWorkspace />
     </PlannerProvider>
   );
@@ -88,6 +96,7 @@ function PlannerWorkspace() {
   }, [dragging]);
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (p.planBusy) return;
       if ((e.target as HTMLElement).matches('input,textarea,select')) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault();
@@ -148,7 +157,7 @@ function PlannerWorkspace() {
         <div className="workspace">
           <Sidebar dragging={!!dragging} />
           <section className="map-area" aria-label="地图与地点收藏" style={{ '--favorite-drawer-height': `${mapDrawerHeight}px` } as CSSProperties}>
-            <MapView drawerHeight={mapDrawerHeight} />
+            {p.ready && <MapView drawerHeight={mapDrawerHeight} />}
             <PlaceSearch />
             <FavoriteDrawer height={drawerHeight} onHeightChange={setDrawerHeight} dragging={!!dragging} />
           </section>
@@ -168,7 +177,8 @@ function PlannerWorkspace() {
       {transferOpen && <TransferDialog onClose={() => setTransferOpen(false)} />}
       {aiOpen && <AIDialog onClose={() => setAiOpen(false)} />}
       {settingsOpen && <MapSettings onClose={() => setSettingsOpen(false)} />}
-      {!p.ready && <div className="startup-overlay" role="status">正在读取本机计划库…</div>}
+      {!p.ready && <div className="startup-overlay"><LoadingPanel detail="正在恢复上次的计划与浏览位置" completed={1} /></div>}
+      {p.planBusy && <div className="plan-operation-overlay" role="status">正在保存计划…</div>}
       {p.cityTarget && <CityDialog key={`${p.cityTarget.dayId}:${p.cityTarget.routeId}`} />}
       {p.repairOpen && <PoiRepairDialog />}
       <div className={`toast ${p.toast ? 'visible' : ''}`} role="status">

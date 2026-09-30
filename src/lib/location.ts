@@ -1,7 +1,7 @@
 import type { Place, PlannerData } from './types';
 
 export const isVerifiedPlace = (place: Place) =>
-  place.provider === 'amap' && place.coordinateSystem === 'GCJ-02' && !!place.poiId;
+  place.provider === 'amap' && place.coordinateSystem === 'GCJ-02' && (!!place.poiId || place.locationSource === 'map-click');
 
 /** Numeric validity is not provenance. Legacy coordinates always require user confirmation. */
 export function migrateData(data: PlannerData): PlannerData {

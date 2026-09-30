@@ -21,7 +21,8 @@ import { selectedCity, setCity } from '@/lib/city';
 import type { City } from '@/lib/types';
 import { updatePlanLibrary } from '@/lib/plan-library';
 import type { RouteSegments } from '@/services/amap-routing';
-import { legacyLibrary, readLibrary, writeLibrary } from '@/services/plan-storage';
+import { legacyLibrary, readLibrary, writeLibrary, type SavedLibrary } from '@/services/plan-storage';
+import { readWorkspaceMemory, restoreSelection, writeWorkspaceMemory } from '@/lib/workspace-memory';
 
 type History = { past: PlannerData[]; present: PlannerData; future: PlannerData[] };
 type Action =
@@ -63,7 +64,7 @@ export type DialogConfig = {
   onConfirm: (value: string) => void;
 };
 export type Destination = { drag: DragData; dayId?: string };
-function usePlannerState() {
+function usePlannerState(initialLibrary?: Promise<SavedLibrary>) {
   const [history, dispatch] = useReducer(historyReducer, {
     past: [],
     present: initialData,
@@ -74,6 +75,8 @@ function usePlannerState() {
   const [focusedDayId, setFocusedDayId] = useState<string | null>(null);
   const [mapExpanded, setMapExpanded] = useState(false);
   const [ready, setReady] = useState(false);
+  const [planBusy, setPlanBusy] = useState(false);
+  const planOperation = useRef(false);
   const [saveStatus, setSaveStatus] = useState('已保存');
   const storageWritable = useRef(true);
   const revision = useRef(0);
@@ -155,10 +158,11 @@ function usePlannerState() {
     let active = true;
     void (async () => {
       try {
-        let library = await readLibrary();
+        let library = await (initialLibrary ?? readLibrary());
         if (!library.plans.length) {
           const legacy = legacyLibrary();
-          try { library = await writeLibrary({ revision: library.revision, ...(legacy ?? { currentId: initialData.trip.id, plans: [initialData] }) }); }
+          const firstPlan = blankPlan();
+          try { library = await writeLibrary({ revision: library.revision, ...(legacy ?? { currentId: firstPlan.trip.id, plans: [firstPlan] }) }); }
           catch (error) { library = await readLibrary(); if (!library.plans.length) throw error; }
         }
         if (!active) return;
@@ -167,6 +171,10 @@ function usePlannerState() {
         latestData.current = current; latestPlans.current = library.plans;
         savedSnapshot.current = JSON.stringify({ currentId: current.trip.id, plans: updatePlanLibrary(library.plans, current) });
         setPlans(library.plans); dispatch({ type: 'load', data: current });
+        const restored = restoreSelection(current, readWorkspaceMemory(current.trip.id)?.selection);
+        setSelection(restored);
+        setExpandedDays(new Set(restored.activeDayId ? [restored.activeDayId] : []));
+        setExpandedRoutes(new Set(restored.activeRouteId ? [restored.activeRouteId] : []));
       } catch (error) {
         if (!active) return;
         storageWritable.current = false;
@@ -176,6 +184,9 @@ function usePlannerState() {
     })();
     return () => { active = false; };
   }, []);
+  useEffect(() => {
+    if (ready) writeWorkspaceMemory(data.trip.id, { selection });
+  }, [ready, data.trip.id, selection]);
   const snapshot = () => JSON.stringify({ currentId: latestData.current.trip.id, plans: updatePlanLibrary(latestPlans.current, migrateData(latestData.current)) });
   const flushSave = async (): Promise<boolean> => {
     if (!ready || !storageWritable.current) return false;
@@ -215,9 +226,9 @@ function usePlannerState() {
     if (!ready) return;
     let active = true;
     const timer = setInterval(() => {
-      if (document.hidden || saving.current || snapshot() !== savedSnapshot.current) return;
+      if (document.hidden || saving.current || planOperation.current || snapshot() !== savedSnapshot.current) return;
       void readLibrary().then(library => {
-        if (!active || saving.current || snapshot() !== savedSnapshot.current || library.revision <= revision.current) return;
+        if (!active || saving.current || planOperation.current || snapshot() !== savedSnapshot.current || library.revision <= revision.current) return;
         const current = library.plans.find(p => p.trip.id === latestData.current.trip.id) ?? library.plans[0];
         if (!current) return;
         revision.current = library.revision; latestPlans.current = library.plans; latestData.current = current;
@@ -536,7 +547,7 @@ function usePlannerState() {
     setExpandedRoutes(new Set(route ? [route.id] : []));
     setSelectedPlace(null);
     setDestination(null);
-    mapService.fitView(
+    if (next.trip.id === data.trip.id) mapService.fitView(
       next.trip.days.flatMap((day) =>
         day.routes.filter((route) => route.visible).flatMap((route) => route.stops).filter(stop => mapProvider === 'mock' || isVerifiedPlace(stop)),
       ),
@@ -544,7 +555,9 @@ function usePlannerState() {
     setToast('行程已导入，可通过撤销恢复原行程');
   };
   const switchPlan = async (next: PlannerData) => {
-    if (!ready) return;
+    if (!ready || planOperation.current) return;
+    planOperation.current = true; setPlanBusy(true);
+    try {
     if (!await flushSave()) { setToast('无法保存当前计划，未切换，请先导出备份'); return; }
     next = latestPlans.current.find(plan => plan.trip.id === next.trip.id) ?? next;
     const library = updatePlanLibrary(latestPlans.current, latestData.current, next);
@@ -552,10 +565,55 @@ function usePlannerState() {
     setPlans(library);
     importData(next);
     dispatch({ type: 'load', data: next });
+    latestData.current = next;
+    const restored = restoreSelection(next, readWorkspaceMemory(next.trip.id)?.selection);
+    setSelection(restored);
+    setExpandedDays(new Set(restored.activeDayId ? [restored.activeDayId] : []));
+    setExpandedRoutes(new Set(restored.activeRouteId ? [restored.activeRouteId] : []));
     setToast(`已切换到 ${next.trip.name}`);
+    } finally { planOperation.current = false; setPlanBusy(false); }
+  };
+  const blankPlan = (name = '新的旅行'): PlannerData => ({ version: 2, trip: { id: makeId('trip'), name, days: [{ id: makeId('day'), name: 'Day 1', date: new Date().toLocaleDateString('sv-SE'), color: COLORS[0], routes: [] }] }, favorites: [] });
+  const deletePlan = (id: string) => {
+    const target = updatePlanLibrary(latestPlans.current, latestData.current).find(plan => plan.trip.id === id);
+    if (!target) return;
+    setDialog({ title: `删除「${target.trip.name}」？`, description: '将删除这个计划及其路线、收藏，无法撤销。删除最后一个计划后会创建一个空白计划。', destructive: true, onConfirm: () => {
+      if (planOperation.current) return;
+      planOperation.current = true; setPlanBusy(true);
+      void (async () => {
+        try {
+          if (!await flushSave()) return;
+          const remaining = updatePlanLibrary(latestPlans.current, latestData.current).filter(plan => plan.trip.id !== id);
+          if (!remaining.length) remaining.push(blankPlan());
+          const next = remaining.find(plan => plan.trip.id === latestData.current.trip.id) ?? remaining[0];
+          const library = await writeLibrary({ revision: revision.current, currentId: next.trip.id, plans: remaining });
+          revision.current = library.revision;
+          latestPlans.current = remaining; latestData.current = next;
+          savedSnapshot.current = JSON.stringify({ currentId: next.trip.id, plans: remaining });
+          setPlans(remaining);
+          if (id === data.trip.id) {
+            dispatch({ type: 'load', data: next });
+            const restored = restoreSelection(next, readWorkspaceMemory(next.trip.id)?.selection);
+            setSelection(restored); setFocusedDayId(null); setSelectedPlace(null); setDestination(null);
+            setExpandedDays(new Set(restored.activeDayId ? [restored.activeDayId] : []));
+            setExpandedRoutes(new Set(restored.activeRouteId ? [restored.activeRouteId] : []));
+          }
+          setSaveStatus('已保存到本机'); setToast(`已删除 ${target.trip.name}`);
+        } catch (error) { setToast(error instanceof Error ? error.message : '删除失败，原计划已保留'); }
+        finally { planOperation.current = false; setPlanBusy(false); }
+      })();
+    } });
   };
   return {
-    ready, flushSave,
+    ready, flushSave, planBusy, deletePlan,
+    renamePlan: (id: string) => {
+      const plan = updatePlanLibrary(latestPlans.current, latestData.current).find(item => item.trip.id === id);
+      if (plan) setDialog({ title: '重命名旅行计划', label: '计划名称', initial: plan.trip.name, onConfirm: name => {
+        if (id === latestData.current.trip.id) commit(current => ({ ...current, trip: { ...current.trip, name } }));
+        else { latestPlans.current = latestPlans.current.map(item => item.trip.id === id ? { ...item, trip: { ...item.trip, name } } : item); setPlans(latestPlans.current); }
+        setToast('计划名称已更新');
+      } });
+    },
     importBrowserPlans: async () => {
       const legacy = legacyLibrary();
       if (!legacy) throw new Error('此浏览器没有旧版计划；可使用 JSON 文件导入');
@@ -573,14 +631,14 @@ function usePlannerState() {
       importData(imported); dispatch({ type: 'load', data: imported });
       setToast('已导入此浏览器旧计划；原记录与备份仍保留');
     },
-    plans: [...plans.filter(plan => plan.trip.id !== data.trip.id), data],
+    plans: updatePlanLibrary(plans, data),
     switchPlan: (id: string) => { const next = plans.find(plan => plan.trip.id === id); if (next && id !== data.trip.id) switchPlan(next); },
-    createPlan: () => setDialog({ title: '开启新的旅行计划', label: '计划名称', initial: '新的旅行', onConfirm: name => switchPlan({ version: 2, trip: { id: makeId('trip'), name, days: [{ id: makeId('day'), name: 'Day 1', date: new Date().toLocaleDateString('sv-SE'), color: COLORS[0], routes: [] }] }, favorites: [] }) }),
+    createPlan: () => setDialog({ title: '开启新的旅行计划', label: '计划名称', initial: '新的旅行', onConfirm: name => switchPlan(blankPlan(name)) }),
     focusedDayId,
     mapExpanded, setMapExpanded,
     mapDays: data.trip.days.filter(day => !focusedDayId || day.id === focusedDayId),
     currentCity: selectedCity(data, selection), cityTarget, setCityTarget, repairOpen, setRepairOpen,
-    setTravelCity: (dayId: string, routeId: string | undefined, city: City | undefined) => { commit(current => setCity(current, dayId, routeId, city)); setCityTarget(null); setToast(city ? `已设置 ${city.name}，地点搜索将限定在该城市` : '已取消单独城市设置'); },
+    setTravelCity: (dayId: string, routeId: string | undefined, city: City | undefined) => { commit(current => setCity(current, dayId, routeId, city)); if (city) { setSelectedPlace(null); mapService.panTo(city, 11); } setCityTarget(null); setToast(city ? `已设置 ${city.name}，地点搜索将限定在该城市` : '已取消单独城市设置'); },
     locateCity: () => {
       const city = selectedCity(data, selection);
       if (city) { setSelectedPlace(null); mapService.panTo(city, 11); setToast(`已定位到 ${city.name} 中心`); }
@@ -662,8 +720,8 @@ function usePlannerState() {
 }
 type PlannerContextType = ReturnType<typeof usePlannerState>;
 const PlannerContext = createContext<PlannerContextType | null>(null);
-export function PlannerProvider({ children }: { children: React.ReactNode }) {
-  return <PlannerContext.Provider value={usePlannerState()}>{children}</PlannerContext.Provider>;
+export function PlannerProvider({ children, initialLibrary }: { children: React.ReactNode; initialLibrary?: Promise<SavedLibrary> }) {
+  return <PlannerContext.Provider value={usePlannerState(initialLibrary)}>{children}</PlannerContext.Provider>;
 }
 export function usePlanner() {
   const value = useContext(PlannerContext);

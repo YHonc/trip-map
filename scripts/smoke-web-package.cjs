@@ -4,11 +4,12 @@ const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const assert = require('node:assert/strict');
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'trip-map-web-package-fixture-'));
-const zip = path.resolve(__dirname, '../release/TripMap-Web-1.1.0-x64.zip');
+const { version } = require('../desktop/app/package.json');
+const zip = path.resolve(__dirname, `../release/TripMap-Web-${version}-x64.zip`);
 const quote = value => `'${value.replace(/'/g, "''")}'`;
 const expanded = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `Expand-Archive -LiteralPath ${quote(zip)} -DestinationPath ${quote(root)}`], { windowsHide: true, stdio: 'inherit' });
 if (expanded.status !== 0) process.exit(expanded.status || 1);
-const env = { ...process.env, TRIP_MAP_DATA_DIR: path.join(root, 'user-data'), TRIP_MAP_PORT: '32151', TRIP_MAP_LEGACY_DIR: root, PATH: `${process.env.SystemRoot}\\System32;${process.env.SystemRoot}\\System32\\WindowsPowerShell\\v1.0` };
+const env = { ...process.env, TRIP_MAP_DATA_DIR: path.join(root, 'user-data'), TRIP_MAP_PORT: '32151', TRIP_MAP_LEGACY_DIR: root, NEXT_PUBLIC_MAP_PROVIDER: 'mock', NEXT_PUBLIC_AMAP_JS_KEY: '', AMAP_WEB_KEY: '', AMAP_SECURITY_CODE: '', AI_API_KEY: '', PATH: `${process.env.SystemRoot}\\System32;${process.env.SystemRoot}\\System32\\WindowsPowerShell\\v1.0` };
 const base = 'http://127.0.0.1:32151';
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function start() {

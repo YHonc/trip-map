@@ -1,11 +1,14 @@
 import type { Coordinate } from '@/lib/types';
 import { runtimeMapConfig } from './map-service';
-export interface AMapOverlay { on(event: string, fn: () => void): void; }
+export type AMapEvent = { lnglat?: { lng: number; lat: number }; name?: string; id?: string };
+export interface AMapOverlay { on(event: string, fn: (event: AMapEvent) => void): void; }
 export interface AMapInstance {
   add(overlays: AMapOverlay[]): void;
   remove(overlays: AMapOverlay[]): void;
-  on(event: string, fn: () => void): void;
-  off(event: string, fn: () => void): void;
+  on(event: string, fn: (event: AMapEvent) => void): void;
+  off(event: string, fn: (event: AMapEvent) => void): void;
+  getCenter(): { lng: number; lat: number };
+  getZoom(): number;
   destroy(): void;
   setCenter(coordinate: number[]): void;
   setZoom(zoom: number): void;
@@ -30,9 +33,7 @@ export function loadAMap(): Promise<AMapSDK> {
   loading = (async () => {
     const key = runtimeMapConfig?.jsKey;
     if (!key) throw new Error('请在顶部“地图设置”中填写 JS API Key');
-    const response = await fetch('/api/amap/config', { signal: AbortSignal.timeout(10_000) });
-    const config = await response.json();
-    if (config.revision !== runtimeMapConfig?.revision) throw new Error('地图设置已更新，请刷新页面');
+    const config = runtimeMapConfig!;
     if (!config.ready) throw new Error(`未配置 ${config.missing.join('、')}`);
     window._AMapSecurityConfig = { serviceHost: `${location.origin}/_AMapService` };
     if (window.AMap) return window.AMap;

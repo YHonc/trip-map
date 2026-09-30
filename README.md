@@ -6,8 +6,9 @@
 
 ## 功能
 
-- **行程编辑**：多计划、Day → Route → Stop 层级，拖动排序、跨路线移动、城市设置、路线显隐及撤销／重做。
-- **地点与地图**：高德搜索、收藏篮、地点确认、驾车／步行／骑行路线，以及同一天相邻路线之间的转场。
+- **行程编辑**：多计划、新建／重命名／删除，Day → Route → Stop 层级，拖动排序、跨路线移动、城市设置、路线显隐及撤销／重做。
+- **地点与地图**：高德搜索、单击地图地标查看地点、双击选取精确坐标，支持收藏和加入行程；驾车／步行／骑行路线及同一天相邻路线之间的转场。
+- **浏览记忆与加载反馈**：恢复上次计划、日期／路线及地图位置；并行读取启动数据，按需加载弹窗，显示加载阶段与进度条。
 - **本地保存**：SQLite 自动保存、版本冲突检测、最近 20 次库快照；同一服务下的桌面与浏览器共享已保存计划。
 - **持久地图缓存**：SQLite 磁盘缓存、分类有效期、请求合并、缓存容量与命中统计，重启后复用未过期结果。
 - **图形化配置**：地图模式、高德 Key、安全密钥、高德兼容 Web 服务地址、连接测试及缓存设置。
@@ -16,7 +17,11 @@
 
 ## 快速开始
 
+本地已有桌面构建时，可双击项目根目录的 `Start-TripMap.cmd`。目录职责、桌面快速启动链路与维护入口见[文件夹架构说明](文件夹架构说明.md)。
+
 ### 从源码启动网页
+
+本地已安装依赖时，可双击项目根目录的 `Start-TripMap-Dev.cmd`：服务就绪后自动打开浏览器，支持源码热更新，按 Ctrl+C 停止。如已创建桌面的 `调试地图.cmd` 快捷脚本，也可从桌面启动。
 
 建议使用 **Node.js 22 LTS（22.12 或更高）** 和 npm，在 Windows x64 上构建桌面版。Electron 44 的安装工具要求 Node.js 22.12+。SQLite 包含原生模块；切换 Node 大版本后应重新安装依赖，若没有对应预编译包，需要本机 C++ 构建工具。
 
@@ -27,7 +32,7 @@ npm ci
 npm run dev
 ```
 
-打开 [http://127.0.0.1:3000](http://127.0.0.1:3000)。首次默认显示「上海 4 日游」演示行程，不需要配置密钥。
+打开 [http://127.0.0.1:3000](http://127.0.0.1:3000)。没有已有数据时创建空白计划，无需密钥即可使用 Mock 地图。配置高德后，地图优先恢复上次浏览位置，再定位计划城市或已确认地点；没有位置记录时显示全国视图。
 
 生产模式：
 
@@ -50,8 +55,8 @@ npm run desktop:build
 
 | 产物 | 用法 |
 | --- | --- |
-| `release/TripMap-Setup-1.1.0-x64.exe` | 安装后从桌面快捷方式启动 |
-| `release/TripMap-Portable-1.1.0-x64.exe` | 双击启动，免安装 |
+| `release/TripMap-Setup-1.2.0-x64.exe` | 安装后从桌面快捷方式启动 |
+| `release/TripMap-Portable-1.2.0-x64.exe` | 双击启动，免安装 |
 | `.desktop-stage/` | 独立网页运行目录，内含 Node；运行 `Start-Web.cmd` |
 
 成品内置运行时，使用者无需安装 Node.js。桌面菜单「文件 → 在浏览器中打开」可连接桌面正在使用的同一个本机服务。
@@ -61,12 +66,21 @@ npm run desktop:build
 ```powershell
 npm run desktop:prepare
 New-Item -ItemType Directory -Force release | Out-Null
-Compress-Archive -Path .desktop-stage/* -DestinationPath release/TripMap-Web-1.1.0-x64.zip -Force
+Compress-Archive -Path .desktop-stage/* -DestinationPath release/TripMap-Web-1.2.0-x64.zip -Force
 ```
 
 解压后运行 `Start-Web.cmd`，访问 [http://127.0.0.1:32145](http://127.0.0.1:32145)；保持服务窗口开启，按 `Ctrl+C` 停止。桌面与网页独立启动时各自需要可用端口，可通过 `TRIP_MAP_PORT` 修改，或关闭前一个服务后再启动。
 
 详见[桌面版使用说明](桌面版使用说明.md)。
+
+## 1.2.0 使用变化
+
+- 点击左上角计划名称展开列表，每行右侧可重命名或删除。删除需确认，包含该计划的路线与收藏；删除最后一个计划会创建空白计划。
+- 高德地图单击有标志的地标，显示官方地点详情；单击空白区域不选点。双击地图选取精确坐标，再从紧凑详情卡片中收藏或加入行程；双击不再缩放地图。
+- 路线图例可关闭，并通过地图上的「图例」按钮重新打开。
+- 当前计划保存在本机计划库；日期／路线选择、地图中心与缩放、图例偏好保存在当前浏览器或桌面会话中。不同浏览器、不同端口的视图记忆分别保存。
+
+完整变更见 [CHANGELOG](CHANGELOG.md) 和 [v1.2.0 Release](https://github.com/YHonc/trip-map/releases/tag/v1.2.0)。
 
 ## 架构
 
@@ -96,7 +110,7 @@ Electron 启动独立 Node 进程承载 Next.js standalone 服务。SQLite 原�
 | --- | --- |
 | JS API Key | 高德 Web 端 JS API 2.0；由浏览器使用，需配置对应域名权限 |
 | 安全密钥 | JS API Key 对应的安全密钥，由本机服务代理使用 |
-| Web 服务 Key | 地点搜索、城市查询与道路规划 |
+| Web 服务 Key | 地点搜索、地标详情、坐标地址解析、城市查询与道路规划 |
 | 高级服务地址 | 高德兼容 Web 服务网关；不代表可直接切换到其他厂商底图 |
 
 保存后应用配置，无需重新打包。连接测试会执行一次真实城市查询；JS Key 与域名权限仍需通过实际底图加载验证。参考[高德 JS API 安全配置](https://lbs.amap.com/api/jsapi-v2/guide/abc/load)及[高德 Web 服务 API](https://lbs.amap.com/api/webservice/summary)。
@@ -152,7 +166,7 @@ npm test
 npm run build
 ```
 
-`npm test` 使用隔离临时目录与替身响应，不调用真实高德／AI 服务。当前覆盖行程操作、导入导出、路线缓存、SQLite 持久化、并发冲突及配置保护。发布前已验证桌面程序、便携版和独立网页包的启动、SQLite 保存、重启读回及退出清理；各版本的验证范围与已知限制见 [Release 说明](https://github.com/YHonc/trip-map/releases)。
+`npm test` 使用隔离临时目录与替身响应，不调用真实高德／AI 服务。当前覆盖行程操作、导入导出、路线缓存、SQLite 持久化、并发冲突、配置保护、地图选点与浏览记忆。成品冒烟入口为 `scripts/smoke-electron.cjs`、`smoke-portable.cjs`、`smoke-web-package.cjs`，验证启动、SQLite 保存、重启读回及退出清理；各版本实际验证范围见 [Release 说明](https://github.com/YHonc/trip-map/releases)。
 
 部分 `scripts/browser-*.js` 是旧版浏览器验收脚本，可能使用真实服务或旧 localStorage 夹具；运行前阅读对应脚本，并使用独立数据目录与浏览器会话。当前桌面版没有代码签名或自动更新，安装／卸载尚未在干净 Windows 虚拟机完成验收，启动速度尚未进行基准测试。
 
