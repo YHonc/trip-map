@@ -1,0 +1,12 @@
+{
+  "name": "trip-map-desktop",
+  "version": "1.1.0",
+  "description": "多日行程地图 · 本机桌面与网页应用",
+  "author": "Trip Map",
+  "main": "main.cjs",
+  "private": true,
+  "license": "MIT",
+  "dependencies": {
+    "electron-log": "^5.4.3"
+  }
+}

@@ -1,0 +1,35 @@
+async (page) => {
+  const passed = [];
+  const assert = (ok, message) => { if (!ok) throw new Error(message); passed.push(message); };
+  await page.route('**/api/ai/optimize', route => route.fulfill({ json: { routes: [{ id: 'route-1', stopIds: ['s0', 's2', 's1'] }], explanation: '隔离测试候选：合并连续同地点访问' } }));
+  await page.getByRole('button', { name: '生成 AI 建议', exact: true }).click();
+  await page.getByRole('button', { name: '应用建议 · 可撤销' }).waitFor();
+  await page.waitForFunction(() => [...document.querySelectorAll('button')].some(b => b.textContent.includes('应用建议') && !b.disabled));
+  await page.getByRole('button', { name: '应用建议 · 可撤销' }).click();
+  await page.waitForTimeout(750);
+  const savedOrder = () => page.evaluate(() => JSON.parse(localStorage.getItem('trip-map-v2')).trip.days[0].routes[0].stops.map(s => s.id).join(','));
+  assert(await savedOrder() === 's0,s2,s1', 'validated fixture candidate applies in one transaction');
+  await page.getByRole('button', { name: '撤销', exact: true }).click();
+  await page.waitForTimeout(750);
+  assert(await savedOrder() === 's0,s1,s2', 'one undo restores original ordering');
+  await page.getByRole('button', { name: 'AI 路线助手', exact: true }).click();
+  await page.getByRole('checkbox', { name: '固定各路线终点' }).uncheck();
+  await page.getByRole('button', { name: '生成 AI 建议', exact: true }).click();
+  await page.getByRole('heading', { name: '方案比较' }).waitFor();
+  await page.getByRole('heading', { name: '方案比较' }).click();
+  await page.keyboard.press('Control+Shift+Z');
+  await page.getByText('行程已编辑，候选已失效，请重新生成。', { exact: true }).waitFor();
+  assert(await page.getByRole('button', { name: '应用建议 · 可撤销' }).isDisabled(), 'edit during preview invalidates candidate');
+  await page.getByRole('button', { name: '关闭弹窗' }).click();
+  await page.getByRole('button', { name: '撤销', exact: true }).click();
+  await page.unroute('**/api/ai/optimize');
+  await page.route('**/api/ai/optimize', route => route.fulfill({ json: { routes: [{ id: 'route-1', stopIds: ['invented', 's2', 's1'] }], explanation: 'invalid' } }));
+  await page.getByRole('button', { name: 'AI 路线助手', exact: true }).click();
+  await page.getByRole('checkbox', { name: '固定各路线终点' }).uncheck();
+  await page.getByRole('button', { name: '生成 AI 建议', exact: true }).click();
+  await page.getByText('AI 增删或跨路线移动了地点', { exact: true }).waitFor();
+  assert(await page.getByRole('heading', { name: '方案比较' }).count() === 0, 'malformed AI candidate is rejected before preview');
+  await page.getByRole('button', { name: '关闭弹窗' }).click();
+  await page.unroute('**/api/ai/optimize');
+  return { passed };
+}

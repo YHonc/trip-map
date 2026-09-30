@@ -1,0 +1,7 @@
+.next
+node_modules
+artifacts
+.playwright-cli
+# Playwright CLI expects an expression with no trailing semicolon.
+scripts/browser-*.js
+scripts/capture-preview.js

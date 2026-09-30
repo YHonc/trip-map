@@ -1,0 +1,12 @@
+const path = require('node:path');
+const { spawn } = require('node:child_process');
+const { mkdirSync } = require('node:fs');
+const root = __dirname;
+const data = process.env.TRIP_MAP_DATA_DIR || path.join(process.env.LOCALAPPDATA || require('node:os').homedir(), 'TripMap');
+mkdirSync(data, { recursive: true });
+const port = process.env.TRIP_MAP_PORT || '32145';
+console.log(`TripMap: http://127.0.0.1:${port}\nData: ${data}\nKeep this window open. Press Ctrl+C to stop.`);
+const child = spawn(path.join(root, 'runtime', 'node.exe'), [path.join(root, 'server', 'server-launcher.cjs')], { cwd: path.join(root, 'server'), windowsHide: true, stdio: 'inherit', env: { ...process.env, NODE_ENV: 'production', HOSTNAME: '127.0.0.1', PORT: port, TRIP_MAP_DATA_DIR: data, TRIP_MAP_PARENT_PID: String(process.pid) } });
+child.on('exit', code => process.exit(code || 0));
+process.on('SIGINT', () => child.kill());
+process.on('SIGTERM', () => child.kill());
