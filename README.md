@@ -40,6 +40,8 @@ npm start
 
 ### Windows 桌面与便携版
 
+前往 [GitHub Releases](https://github.com/YHonc/trip-map/releases/latest) 下载：`Setup` 为安装版，`Portable` 为免安装版，`Web` ZIP 为独立本地网页包。下载后可用同页的 `SHA256SUMS.txt` 校验完整性。当前 Windows 程序尚未进行代码签名。
+
 源码仓库不包含构建后的大体积二进制文件。使用下面的构建命令可生成安装包与便携包：
 
 ```bash
