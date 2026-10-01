@@ -43,8 +43,8 @@ npm run desktop:build
 
 | 产物 | 用途 |
 | --- | --- |
-| `release/TripMap-Setup-1.3.0-x64.exe` | Windows 安装包 |
-| `release/TripMap-Portable-1.3.0-x64.exe` | 免安装便携包 |
+| `release/TripMap-Setup-1.3.1-x64.exe` | Windows 安装包 |
+| `release/TripMap-Portable-1.3.1-x64.exe` | 免安装便携包 |
 | `release/win-unpacked/` | 完整桌面程序，可通过根目录 `Start-TripMap.cmd` 启动 |
 | `.desktop-stage/` | 包含 Node 的独立网页运行目录 |
 
@@ -53,7 +53,7 @@ npm run desktop:build
 ```powershell
 npm run desktop:prepare
 New-Item -ItemType Directory -Force release | Out-Null
-Compress-Archive -Path .desktop-stage/* -DestinationPath release/TripMap-Web-1.3.0-x64.zip -Force
+Compress-Archive -Path .desktop-stage/* -DestinationPath release/TripMap-Web-1.3.1-x64.zip -Force
 ```
 
 解压后运行 `Start-Web.cmd`，访问 `http://127.0.0.1:32145`。保持服务窗口开启，按 Ctrl+C 停止。桌面与网页独立启动时各自需要可用端口，可通过 `TRIP_MAP_PORT` 修改，或关闭前一个服务后再启动。源码开发默认端口为 3000。
@@ -82,11 +82,15 @@ PNG／SVG 导出通过[高德官方静态地图接口](https://lbs.amap.com/api/
 
 「自定义提示词」保存到数据目录的 `ai-prompt.json`，供各旅行计划共用，与 AI 连接配置分开。最多 4,000 字符；保存后用于后续优化请求，已有地点与候选结构的校验规则仍由程序保持。
 
-TXT 攻略保存在 `data.sqlite` 的独立 `ai_references` 表，以计划 ID 隔离。每计划最多 20 份、总计 1 MB，每份最多 100 KB，支持 UTF-8 与 GBK。删除计划时在同一事务中清理其资料，计划保存冲突不会提前删除资料。
+「优化路线 → 自定义语句」最多 1,000 字符，随本次请求发送，优先于常用偏好，不修改已保存的提示词。固定起终点、已选地点的相对先后顺序和优化目标仍由程序校验。相对顺序约束需选择同一路线中的两个或以上地点，不固定其绝对位置。
+
+攻略可直接输入／粘贴，或选择、拖入 TXT 文件，统一保存在 `data.sqlite` 的独立 `ai_references` 表，以计划 ID 隔离。每计划最多 20 份、总计 1 MB，每份最多 100 KB，TXT 支持 UTF-8 与 GBK。输入草稿在本次弹窗内切换页签时保留，点击「保存攻略」后持久化。删除计划时在同一事务中清理其资料，计划保存冲突不会提前删除资料。
 
 优化默认不参考攻略。开启后每次最多选择 8 份；服务端根据地点名和中文分词提取相关段落，每份最多两段，总上下文最多 12,000 字符。未匹配内容不发送，建议预览展示实际发送片段及未命中的资料。资料正文作为上下文数据，不作为系统指令。
 
 JSON 行程导出不包含攻略库和自定义提示词。完整迁移时关闭服务并备份整个数据目录；删除资料后，重新导入行程 JSON 不会恢复资料。
+
+JSON 导入允许日期为空或缺失，统一保存为空字符串并显示「日期待定」；填写的日期仍需符合有效的 `YYYY-MM-DD`。经纬度为 `null` 或缺失时保留为待确认地点，地图和导出只绘制具备有效坐标的地点，包含待定位地点的路线暂不算路。地点、路线和顺序仍完整保存，可通过现有地点确认流程补全。
 
 路线样式参考 [Mapbox Route line](https://docs.mapbox.com/android/navigation/guides/ui-components/route-line/) 的多层描边方式，用白色描边分隔道路底图，所选路线加粗；高德地图、演示地图和图片导出使用统一线宽定义。
 
@@ -110,6 +114,8 @@ JSON 行程导出不包含攻略库和自定义提示词。完整迁移时关闭
 | 步行／骑行路线 | 1 天 |
 
 默认缓存内容容量为 128 MB。缓存按服务配置、请求参数、坐标系、方向与交通方式隔离；有效期内复用，过期请求重新获取，失败结果不缓存。设置页展示命中、未命中、请求合并与容量统计，清理缓存不会删除计划。
+
+新页面仍会发出 `/api/amap/route` 本机请求，由服务端读取内存或 SQLite 缓存；本机 POST 不等于调用高德。保存未变化的地图设置保留配置版本，实际修改后才切换版本。开发环境的路线日志显示缓存来源和高德请求次数，响应头继续提供 `X-Map-Cache`、`X-Amap-Upstream-Requests` 和计算时间。
 
 已展示的路线不会按有效期自动刷新为实时路况，侧栏会标明计算时间；需要更新时可使用「清空缓存并重新获取」。
 

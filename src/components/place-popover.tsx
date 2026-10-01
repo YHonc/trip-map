@@ -4,6 +4,7 @@ import { usePlanner } from '@/hooks/use-planner';
 import { IconButton } from './ui';
 import { useLayoutEffect, useRef } from 'react';
 import type { Point, Size } from '@/lib/map-geometry';
+import { hasCoordinates } from '@/lib/location';
 export function PlacePopover({ anchor, onSize, loading, error, onRetry }: { anchor: Point; onSize?: (size: Size) => void; loading?: boolean; error?: string; onRetry?: () => void }) {
   const p = usePlanner();
   const place = p.selectedPlace;
@@ -39,7 +40,7 @@ export function PlacePopover({ anchor, onSize, loading, error, onRetry }: { anch
       </div>
       <h2 title={place.name}>{place.name}</h2>
       <p className="place-address" title={place.address}>{place.address}</p>
-      {place.locationSource === 'map-click' && !place.poiId && <small className="place-coordinates" aria-label="精确坐标">{place.lng.toFixed(6)}, {place.lat.toFixed(6)}</small>}
+      {!hasCoordinates(place) ? <small className="place-coordinates">位置待确认</small> : place.locationSource === 'map-click' && !place.poiId && <small className="place-coordinates" aria-label="精确坐标">{place.lng.toFixed(6)}, {place.lat.toFixed(6)}</small>}
       {loading && <div className="place-lookup-status" role="status">正在查找详细地址…<div className="inline-progress" /></div>}
       {error && <div className="place-lookup-status" role="status">{error} · 可直接保存此坐标<button className="text-button" onClick={onRetry}>重试</button></div>}
       {place.provider === 'amap' && p.placeSource === 'searchResult' && p.selection.activeStopId && (

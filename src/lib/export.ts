@@ -3,6 +3,7 @@ import { routeLineStyle } from './route-style';
 import { exportMapPoint, type ExportBasemap } from './export-map';
 import { dayStopOffset } from './planner';
 import { dayConnections } from './connections';
+import { hasCoordinates } from './location';
 import type { PlannerData, RouteResult } from './types';
 
 const escapeXml = (value: string) =>
@@ -37,7 +38,7 @@ export function createRouteMapSvg(data: PlannerData, basemap: string | ExportBas
   const connections = data.trip.days.flatMap(dayConnections).filter(c => c.enabled);
   const geometries = [...routes.map(r => r.geometry), ...connections.map(c => transfers[c.id]?.status === 'ready' ? transfers[c.id].geometry : undefined)];
   // Include detours and non-road connectors, including transfer-only itineraries.
-  const points = [...routes.flatMap(item => item.route.stops), ...geometries.flatMap(g => g ? [...(g.paths ?? [g.path]).flat(), ...(g.connectors ?? []).flat()] : [])].map(project);
+  const points = [...routes.flatMap(item => item.route.stops).filter(hasCoordinates), ...geometries.flatMap(g => g ? [...(g.paths ?? [g.path]).flat(), ...(g.connectors ?? []).flat()] : [])].map(project);
   const bounds = points.reduce((b, p) => ({ minX: Math.min(b.minX, p.x), maxX: Math.max(b.maxX, p.x), minY: Math.min(b.minY, p.y), maxY: Math.max(b.maxY, p.y) }),
     { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
   const { minX, maxX, minY, maxY } = points.length ? bounds : { minX: 100, maxX: 1100, minY: 100, maxY: 780 };
@@ -63,6 +64,7 @@ export function createRouteMapSvg(data: PlannerData, basemap: string | ExportBas
     .join('');
   const markerGroups = new Map<string, { point: { x: number; y: number }; color: string; name: string; numbers: number[] }>();
   routes.forEach(({ day, route }) => route.stops.forEach((stop, index) => {
+    if (!hasCoordinates(stop)) return;
     const key = JSON.stringify([day.id, stop.lng, stop.lat, stop.name]);
     const group = markerGroups.get(key) ?? { point: project(stop), color: day.color, name: stop.name, numbers: [] };
     group.numbers.push(dayStopOffset(day, route.id) + index + 1);
@@ -91,7 +93,7 @@ export function createRouteMapSvg(data: PlannerData, basemap: string | ExportBas
     .map((day, index) => {
       const x = 48 + (index % 5) * 302,
         y = mapHeight + 133 + Math.floor(index / 5) * 42;
-      return `<circle cx="${x}" cy="${y}" r="7" fill="${escapeXml(day.color)}"/><text x="${x + 17}" y="${y + 5}" font-size="14" fill="#58708e">${escapeXml(day.name)} · ${escapeXml(day.date)} · ${day.routes.reduce((n, r) => n + r.stops.length, 0)} 个地点</text>`;
+      return `<circle cx="${x}" cy="${y}" r="7" fill="${escapeXml(day.color)}"/><text x="${x + 17}" y="${y + 5}" font-size="14" fill="#58708e">${escapeXml(day.name)} · ${escapeXml(day.date || '日期待定')} · ${day.routes.reduce((n, r) => n + r.stops.length, 0)} 个地点</text>`;
     })
     .join('');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><style>text{font-family:'Segoe UI','Microsoft YaHei',sans-serif}.district-labels{fill:#8293a8;font-size:21px;font-weight:600;paint-order:stroke;stroke:#fff;stroke-width:3}.street-labels{fill:#a1b1bd;font-size:9px}</style><defs><clipPath id="export-map-clip"><rect x="0" y="0" width="${width}" height="${mapHeight}"/></clipPath></defs><rect width="100%" height="100%" fill="#f6faff"/><text x="40" y="50" font-size="28" fill="#172a4b" font-weight="650">${escapeXml(data.trip.name)}</text><text x="42" y="78" font-size="13" fill="#879ab0">完整路线图 · ${data.trip.days.length} 天 · ${routes.length} 条路线 · ${escapeXml(footer)}</text><g transform="translate(0 98)" clip-path="url(#export-map-clip)"><rect width="${width}" height="${mapHeight}" fill="#eef3f2"/><g transform="translate(${tx} ${ty}) scale(${scale})">${raster ? `<image width="${width}" height="${mapHeight}" href="${raster.dataUrl}"/>` : basemap}${lines}${connectionLines}${connectors}${markers}</g></g>${legend}</svg>`;
@@ -186,7 +188,7 @@ export async function createPlanningPng(data: PlannerData, basemap: string | Exp
     context.fillText(day.name, gap + 56, y + 47, leftWidth - 90);
     context.fillStyle = '#8a9cb3';
     context.font = '17px "Microsoft YaHei",sans-serif';
-    context.fillText(day.date, gap + 26, y + 77);
+    context.fillText(day.date || '日期待定', gap + 26, y + 77);
     let lineY = y + 107;
     if (!routes.length) {
       context.fillText('自由安排', gap + 26, lineY);

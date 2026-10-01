@@ -3,7 +3,10 @@ export interface Coordinate {
   lng: number;
   lat: number;
 }
-export interface Place extends Coordinate {
+export interface Place {
+  /** null means the itinerary place has not been located yet. */
+  lng: number | null;
+  lat: number | null;
   provider?: 'mock' | 'amap' | 'unknown';
   coordinateSystem?: 'GCJ-02' | 'demo' | 'unknown';
   poiId?: string;

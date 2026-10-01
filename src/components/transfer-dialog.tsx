@@ -274,7 +274,7 @@ function ItineraryPreview({ data }: { data: PlannerData }) {
           <h4>
             <i style={{ background: day.color }} />
             {day.name}
-            <span>{day.date}</span>
+            <span>{day.date || '日期待定'}</span>
           </h4>
           {day.routes.length ? (
             day.routes.map((route) => (

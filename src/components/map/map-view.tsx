@@ -8,6 +8,7 @@ import { buildMockRoute, mapService, mapProvider } from '@/services/map-service'
 import { AMapView } from './amap-view';
 import { dayStopOffset } from '@/lib/planner';
 import { dayConnections } from '@/lib/connections';
+import { hasCoordinates } from '@/lib/location';
 import { Cartography } from './cartography';
 import { IconButton } from '../ui';
 import { PlacePopover } from '../place-popover';
@@ -59,14 +60,16 @@ function MockMapView({ drawerHeight }: { drawerHeight: number }) {
     );
   const markerHeight = p.placeSource === 'searchResult' ? 49 : isPlanned ? 34 : 12;
   const anchorFor = (view: Camera) => {
-    const position = toScreen(p.selectedPlace!, view, size);
+    const place = p.selectedPlace;
+    if (!place || !hasCoordinates(place)) return { x: size.width / 2, y: Math.max(220, size.height / 2) };
+    const position = toScreen(place, view, size);
     return {
       x: position.x,
       y: position.y - markerHeight * Math.sqrt(view.scale) * viewportScale(size) - 10,
     };
   };
   useLayoutEffect(() => {
-    if (!p.selectedPlace || !container.current) return;
+    if (!p.selectedPlace || !hasCoordinates(p.selectedPlace) || !container.current) return;
     const element = container.current;
     const area = element.getBoundingClientRect();
     const drawer = element.parentElement
@@ -202,6 +205,7 @@ function MockMapView({ drawerHeight }: { drawerHeight: number }) {
             .sort((a, b) => Number(a.route.id === p.selection.activeRouteId) - Number(b.route.id === p.selection.activeRouteId))
             .map(({ day, route }) => <RoutePolyline key={route.id} day={day} route={route} />)}
           {p.data.favorites
+            .filter(hasCoordinates)
             .filter((f) => !plannedIds.has(f.id))
             .map((place) => {
               const point = project(place);
@@ -246,7 +250,7 @@ function MockMapView({ drawerHeight }: { drawerHeight: number }) {
                 )),
               ),
           )}
-          {p.selectedPlace && p.placeSource === 'searchResult' && (
+          {p.selectedPlace && hasCoordinates(p.selectedPlace) && p.placeSource === 'searchResult' && (
             <SearchMarker coordinate={p.selectedPlace} scale={camera.scale} />
           )}
         </g>
@@ -264,7 +268,7 @@ function MockMapView({ drawerHeight }: { drawerHeight: number }) {
               p.data.trip.days
                 .find((d) => d.id === p.selection.activeDayId)
                 ?.routes.flatMap((r) => r.stops)[0];
-            if (coordinate) mapService.panTo(coordinate);
+            if (coordinate && hasCoordinates(coordinate)) mapService.panTo(coordinate);
             else p.fitAllVisibleRoutes();
           }}
         >
@@ -289,9 +293,9 @@ function MockMapView({ drawerHeight }: { drawerHeight: number }) {
 function RoutePolyline({ day, route }: { day: Day; route: Route }) {
   const p = usePlanner();
   const result = p.routeResults[route.id];
-  const fallback = useMemo(() => buildMockRoute(route.stops), [route.stops]);
+  const fallback = useMemo(() => route.stops.every(hasCoordinates) ? buildMockRoute(route.stops) : undefined, [route.stops]);
   const geometry = result?.geometry ?? fallback;
-  if (route.stops.length < 2) return null;
+  if (route.stops.length < 2 || !fallback || !geometry) return null;
   const active = p.selection.activeRouteId === route.id;
   const style = routeLineStyle(active);
   const points = geometry.path
@@ -350,6 +354,7 @@ function MapMarker({
   scale: number;
 }) {
   const p = usePlanner();
+  if (!hasCoordinates(stop)) return null;
   const point = project(stop);
   const selected = p.selection.activeStopId === stop.id;
   return (

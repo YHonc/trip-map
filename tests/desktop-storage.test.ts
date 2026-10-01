@@ -74,6 +74,12 @@ test('capacity evicts old entries; disabled persistence does not populate disk',
   await cachedMap('city', ['off'], { ...config, cache: { ...config.cache, enabled: false } }, async () => ['ok']);
   assert.equal(cacheStats().groups.length, 0);
 });
+test('first save persists unchanged environment defaults without changing the cache revision', () => {
+  const before = publicMapConfig();
+  const saved = saveMapConfig(before);
+  assert.equal(saved.revision, before.revision);
+  assert.equal(JSON.parse(readFileSync(path.join(root, 'map-config.json'), 'utf8')).revision, before.revision);
+});
 test('map configuration is runtime, secret-safe, revision checked and clears credentials on gateway change', () => {
   const before = publicMapConfig();
   const saved = saveMapConfig({ ...before, provider: 'amap', jsKey: 'test-js', webKey: 'test-web-secret', securityCode: 'test-security-secret' });
@@ -89,4 +95,18 @@ test('map configuration is runtime, secret-safe, revision checked and clears cre
   const changed = saveMapConfig({ ...saved, baseURL: 'http://127.0.0.1:49876', webKey: '' });
   assert.equal(changed.hasWebKey, false);
   assert.notEqual(changed.revision, saved.revision);
+});
+test('saving unchanged map settings keeps route cache usable; actual edits isolate it', async () => {
+  const before = publicMapConfig();
+  let calls = 0;
+  const run = async () => ({ distance: ++calls, duration: 1, path: [] });
+  await cachedMap('driving', ['unchanged-settings'], readMapConfig(), run);
+  const saved = saveMapConfig({ ...before, baseURL: before.baseURL + '/', webKey: '', securityCode: '' });
+  assert.equal(saved.revision, before.revision);
+  await cachedMap('driving', ['unchanged-settings'], readMapConfig(), run);
+  assert.equal(calls, 1);
+  const changed = saveMapConfig({ ...saved, cache: { ...saved.cache, ttl: { ...saved.cache.ttl, driving: saved.cache.ttl.driving + 1 } } });
+  assert.notEqual(changed.revision, before.revision);
+  await cachedMap('driving', ['unchanged-settings'], readMapConfig(), run);
+  assert.equal(calls, 2);
 });

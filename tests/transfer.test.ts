@@ -4,6 +4,9 @@ import { initialData } from '../src/lib/data';
 import { parsePlannerData, serializePlannerData, validatePlannerData } from '../src/lib/transfer';
 import { minimumPan, toScreen } from '../src/lib/map-geometry';
 import { createRouteMapSvg, safeFilename } from '../src/lib/export';
+import { hasCoordinates, isVerifiedPlace } from '../src/lib/location';
+import { repairGroups, applyRepairs } from '../src/lib/poi-repair';
+import { exportViewport } from '../src/lib/export-map';
 
 test('existing JSON backups round-trip without changing data',()=>{
   assert.deepEqual(parsePlannerData(serializePlannerData(initialData)).data,initialData);
@@ -25,6 +28,29 @@ test('import rejects coordinates, impossible dates, and unsupported modes',()=>{
   const data=structuredClone(initialData);data.favorites[0].lat=NaN;assert.throws(()=>validatePlannerData(data),/纬度/);
   data.favorites[0].lat=31.2;data.trip.days[0].date='2026-02-30';assert.throws(()=>validatePlannerData(data),/有效/);
   data.trip.days[0].date='2026-02-20';(data.trip.days[0].routes[0] as {mode:string}).mode='fly';assert.throws(()=>validatePlannerData(data),/driving/);
+});
+test('undated plans and unlocated stops survive import, persistence and later POI confirmation', () => {
+  const source = structuredClone(initialData) as any;
+  source.trip.days[0].date = '';
+  const raw = source.trip.days[0].routes[0].stops[1];
+  Object.assign(raw, { lng: null, lat: null, provider: null, coordinateSystem: null, poiId: null, placeId: null, name: '位置待确认示例' });
+  const result = validatePlannerData(source), data = result.data;
+  const stop = data.trip.days[0].routes[0].stops[1];
+  assert.equal(data.trip.days[0].date, '');
+  assert.equal(stop.lng, null); assert.equal(stop.lat, null);
+  assert.equal(hasCoordinates(stop), false); assert.equal(isVerifiedPlace(stop), false);
+  assert.equal(isVerifiedPlace({ ...stop, provider: 'amap', coordinateSystem: 'GCJ-02', poiId: 'fake-provenance' }), false);
+  assert.deepEqual(data.trip.days[0].routes[0].stops.map(s => s.id), source.trip.days[0].routes[0].stops.map((s: any) => s.id));
+  assert.deepEqual(parsePlannerData(serializePlannerData(data)).data, data);
+  assert.ok(result.warnings.some(w => w.includes('日期待定')));
+  assert.ok(result.warnings.some(w => w.includes('待确认地点')));
+  const svg = createRouteMapSvg(data);
+  assert.ok(!svg.includes('位置待确认示例') && !svg.includes('NaN'));
+  const viewport = exportViewport(data); assert.ok(Number.isFinite(viewport.center.lng));
+  const group = repairGroups(data).find(g => g.stop.id === stop.id)!;
+  const confirmed = { ...stop, lng: 118.1, lat: 24.6, provider: 'amap' as const, coordinateSystem: 'GCJ-02' as const, poiId: 'fixture-confirmed' };
+  const repaired = applyRepairs(data, JSON.stringify(data), [group], { [group.key]: confirmed });
+  assert.equal(isVerifiedPlace(repaired.trip.days[0].routes[0].stops[1]), true);
 });
 test('import normalizes order, preserves hidden routes and repeated places',()=>{
   const data=structuredClone(initialData);const route=data.trip.days[0].routes[0];route.stops[0].order=50;route.visible=false;

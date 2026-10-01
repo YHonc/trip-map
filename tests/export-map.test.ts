@@ -11,6 +11,7 @@ import { parsePlannerData, serializePlannerData } from '../src/lib/transfer';
 import { staticMapAmap } from '../src/services/server/static-map';
 import { GET } from '../src/app/api/amap/static-map/route';
 import type { RouteResult } from '../src/lib/types';
+import { hasCoordinates } from '../src/lib/location';
 
 test('import gives days distinct colors, keeps route colors in sync and does not mutate backups', () => {
   const source = structuredClone(initialData);
@@ -34,7 +35,7 @@ test('export projection places the center correctly and fits all days, hidden ro
   const viewport = exportViewport(data, results);
   assert.deepEqual(exportMapPoint(viewport.center, viewport), { x: 800, y: 425 });
   const points = [...data.trip.days.flatMap(d => d.routes.flatMap(r => r.stops)), detour, { lng: 121.1, lat: 31 }];
-  for (const point of points) { const pixel = exportMapPoint(point, viewport); assert.ok(pixel.x > 200 && pixel.x < 1400 && pixel.y > 70 && pixel.y < 780); }
+  for (const point of points) { assert.ok(hasCoordinates(point)); const pixel = exportMapPoint(point, viewport); assert.ok(pixel.x > 200 && pixel.x < 1400 && pixel.y > 70 && pixel.y < 780); }
   // One degree at the equator has a known Web Mercator pixel span.
   assert.ok(Math.abs(exportMapPoint({ lng: 1, lat: 0 }, { center: { lng: 0, lat: 0 }, zoom: 8 }).x - 800 - 262144 / 360) < 1e-8);
   const reference = exportMapPoint({ lng: 121.047504, lat: 29.170432 }, { center: { lng: 121.008734, lat: 28.920786 }, zoom: 9 });

@@ -13,6 +13,10 @@ export function withRequestTrace(handler: (request: Request) => Promise<Response
     response.headers.set('X-Amap-Upstream-Requests', String(trace.getStore()!.upstream));
     if (trace.getStore()!.cache) response.headers.set('X-Map-Cache', trace.getStore()!.cache!);
     if (trace.getStore()!.fetchedAt) response.headers.set('X-Map-Calculated-At', String(trace.getStore()!.fetchedAt));
+    if (process.env.NODE_ENV === 'development' && new URL(request.url).pathname === '/api/amap/route') {
+      const current = trace.getStore()!;
+      console.info(`[地图路线] ${response.status} · 缓存=${current.cache ?? '未命中或失败'} · 高德请求=${current.upstream} 次`);
+    }
     return response;
   });
 }

@@ -20,7 +20,7 @@ export function getReference(planId: unknown, id: unknown): TravelReference {
   return row;
 }
 export function addReference(planId: unknown, name: unknown, text: unknown): ReferenceInfo {
-  if (typeof name !== 'string' || !name.trim() || name.length > 160 || typeof text !== 'string' || !text.trim() || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(text)) throw new Error('请导入包含正文的 TXT 文本');
+  if (typeof name !== 'string' || !name.trim() || name.length > 160 || typeof text !== 'string' || !text.trim() || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(text)) throw new Error('请填写有效的攻略名称和正文，或上传包含正文的 TXT 文本');
   const normalized = text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
   const bytes = Buffer.byteLength(normalized);
   if (bytes > MAX_REFERENCE_BYTES) throw new Error('每份攻略正文最大 100 KB');

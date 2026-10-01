@@ -1,7 +1,13 @@
 import type { Day, PlannerData, Route } from './types';
 import { normalize } from './planner';
 
-export type OptimizeOptions = { scope: 'route' | 'day'; objective: 'duration' | 'distance'; fixedStart: boolean; fixedEnd: boolean; lockedIds: string[]; allowRouteReorder: boolean };
+export const MAX_OPTIMIZATION_NOTE_LENGTH = 1000;
+export function validateOptimizationNote(value: unknown): string {
+  if (value === undefined) return '';
+  if (typeof value !== 'string' || value.length > MAX_OPTIMIZATION_NOTE_LENGTH || value.includes('\0')) throw new Error('AI 自定义语句格式无效，最多 1000 字');
+  return value.trim();
+}
+export type OptimizeOptions = { scope: 'route' | 'day'; objective: 'duration' | 'distance'; fixedStart: boolean; fixedEnd: boolean; lockedIds: string[]; allowRouteReorder: boolean; customInstructions?: string };
 export type Candidate = { routes: { id: string; stopIds: string[] }[]; explanation: string };
 export function validateCandidate(value: unknown, routes: Route[], options: OptimizeOptions): Candidate {
   if (!value || typeof value !== 'object') throw new Error('AI 未返回有效候选');

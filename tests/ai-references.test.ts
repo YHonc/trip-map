@@ -37,7 +37,7 @@ test('prompt persists independently from connection settings and retains output 
   assert.equal(readTravelPrompt(), custom);
   assert.deepEqual(readConfigFile('ai-config.json', []), config);
   const messages = optimizationMessages([], {}, custom, []);
-  assert.equal(messages[0].content, OPTIMIZATION_RULES);
+  assert.ok(messages[0].content.startsWith(OPTIMIZATION_RULES));
   assert.equal(JSON.parse(messages[1].content).travelPreferences, custom);
   assert.equal((await savePromptAPI(request('prompt', { prompt: 'a'.repeat(4001) }))).status, 400);
   assert.equal((await savePromptAPI(request('prompt', { prompt: custom }, 'https://foreign.invalid'))).status, 400);
@@ -110,15 +110,34 @@ test('optimization sends the saved custom prompt and only selected references to
     return Response.json({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ routes: [{ id: route.id, stopIds: route.stops.map(s => s.id) }], explanation: '参考 chosen.txt 安排顺序' }) } }] });
   }) as typeof fetch;
   try {
-    const response = await optimize(request('optimize', { planId: 'plan-a', referenceIds: [selected.id], routes: [route], options: { scope: 'route', objective: 'distance', fixedStart: true, fixedEnd: true, lockedIds: [], allowRouteReorder: false } }));
+    const response = await optimize(request('optimize', { planId: 'plan-a', referenceIds: [selected.id], routes: [route], options: { scope: 'route', objective: 'distance', fixedStart: true, fixedEnd: true, lockedIds: [], allowRouteReorder: false, customInstructions: '  先游览景点，再安排附近美食。  ' } }));
     assert.equal(response.status, 200); assert.equal(calls, 1);
     const sent = JSON.parse(payload.messages[1].content);
     assert.equal(sent.travelPreferences, '请简短说明排序理由');
+    assert.equal(sent.options.customInstructions, '先游览景点，再安排附近美食。');
+    assert.equal(readTravelPrompt(), '请简短说明排序理由', 'request preferences do not overwrite the saved prompt');
     assert.ok(sent.referenceExcerpts.every((r: { sourceId: string }) => r.sourceId === selected.id));
     assert.ok(!JSON.stringify(payload).includes('REFERENCE_SECRET'));
     assert.ok(!JSON.stringify(payload).includes('fixture-only'));
     assert.equal((await response.json()).referenceExcerpts[0].sourceId, selected.id);
   } finally { globalThis.fetch = oldFetch; }
+});
+test('optimization rejects malformed or oversized request preferences before calling AI', async () => {
+  const route = library().plans[0].trip.days[0].routes[0];
+  for (const customInstructions of [null, 123, {}, 'a'.repeat(1001), 'bad\0text']) {
+    const response = await optimize(request('optimize', { routes: [route], options: { scope: 'route', objective: 'distance', fixedStart: true, fixedEnd: true, lockedIds: [], allowRouteReorder: false, customInstructions } }));
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error, /自定义语句格式无效/);
+  }
+});
+test('plain text references use the same plan-scoped storage as uploaded TXT', async () => {
+  library();
+  const response = await upload(request('references', { planId: 'plan-a', name: '手写游览笔记', text: '国清寺\n附近安排午餐。' }));
+  assert.equal(response.status, 200);
+  const saved = listReferences('plan-a');
+  assert.equal(saved[0].name, '手写游览笔记');
+  assert.equal(getReference('plan-a', saved[0].id).text, '国清寺\n附近安排午餐。');
+  assert.deepEqual(listReferences('plan-b'), []);
 });
 test('route palette avoids warm road colors and inactive routes retain a visible casing', () => {
   assert.ok(!COLORS.includes('#ff8b36'));

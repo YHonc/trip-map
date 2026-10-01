@@ -13,7 +13,7 @@ import {
   TravelMode,
 } from '@/lib/types';
 import { mapService, mapProvider } from '@/services/map-service';
-import { migrateData, isVerifiedPlace } from '@/lib/location';
+import { migrateData, isVerifiedPlace, hasCoordinates } from '@/lib/location';
 import { dayConnections } from '@/lib/connections';
 import { parsePlannerData } from '@/lib/transfer';
 import { routingFingerprint } from '@/lib/routing-fingerprint';
@@ -143,7 +143,7 @@ function usePlannerState(initialLibrary?: Promise<SavedLibrary>) {
       setTransferResults(prev => ({ ...prev, [connection.id]: { status: 'loading' } }));
       void (async () => {
         try {
-          if (mapProvider !== 'mock' && stops.some(stop => !isVerifiedPlace(stop))) throw new Error('转场端点待确认');
+          if (!stops.every(hasCoordinates) || (mapProvider !== 'mock' && !stops.every(isVerifiedPlace))) throw new Error('转场端点待确认');
           const calculate = { driving: mapService.calculateDrivingRoute, walking: mapService.calculateWalkingRoute, riding: mapService.calculateRidingRoute }[connection.mode];
           const geometry = await calculate(stops, isCurrent, transferSegments.current[connection.id] ??= new Map());
           if (isCurrent()) setTransferResults(prev => ({ ...prev, [connection.id]: { status: 'ready', geometry } }));
@@ -295,7 +295,8 @@ function usePlannerState(initialLibrary?: Promise<SavedLibrary>) {
       },
     }));
     try {
-      if (mapProvider !== 'mock' && route.stops.some(stop => !isVerifiedPlace(stop)))
+      if (!route.stops.every(hasCoordinates)) throw new Error('含待定位地点，请先确认地点位置');
+      if (mapProvider !== 'mock' && !route.stops.every(isVerifiedPlace))
         throw new Error('含演示或未知来源坐标，请搜索并确认高德地点');
       const calculate = {
         driving: mapService.calculateDrivingRoute,
@@ -369,6 +370,7 @@ function usePlannerState(initialLibrary?: Promise<SavedLibrary>) {
       expandDay(dayId);
       expandRoute(routeId);
     }
+    if (!hasCoordinates(place)) setToast('此地点尚未定位，请使用“确认地点”或搜索后替换');
   };
   const addToRoute = (drag: DragData, dayId: string, routeId: string, index?: number) => {
     commit((current) =>
@@ -447,12 +449,13 @@ function usePlannerState(initialLibrary?: Promise<SavedLibrary>) {
     commit((current) => updateRoute(current, routeId, (r) => ({ ...r, ...patch })));
   const addDay = () => {
     const index = data.trip.days.length;
-    const date = new Date(`${data.trip.days.at(-1)?.date ?? '2026-04-11'}T12:00:00`);
+    const previousDate = data.trip.days.at(-1)?.date;
+    const date = new Date(`${previousDate || '2000-01-01'}T12:00:00`);
     date.setDate(date.getDate() + 1);
     const day: Day = {
       id: makeId('day'),
       name: `Day ${index + 1}`,
-      date: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`,
+      date: previousDate ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` : '',
       color: COLORS[index % COLORS.length],
       routes: [],
     };
@@ -512,7 +515,7 @@ function usePlannerState(initialLibrary?: Promise<SavedLibrary>) {
     const coordinates = data.trip.days.flatMap((d) =>
       d.routes.filter((r) => r.visible).flatMap((r) => r.stops),
     );
-    mapService.fitView(mapProvider === 'mock' ? coordinates : coordinates.filter(isVerifiedPlace));
+    mapService.fitView(coordinates.filter(hasCoordinates).filter(stop => mapProvider === 'mock' || isVerifiedPlace(stop)));
     setSelectedPlace(null);
   };
   const importData = (next: PlannerData) => {
@@ -549,7 +552,7 @@ function usePlannerState(initialLibrary?: Promise<SavedLibrary>) {
     setDestination(null);
     if (next.trip.id === data.trip.id) mapService.fitView(
       next.trip.days.flatMap((day) =>
-        day.routes.filter((route) => route.visible).flatMap((route) => route.stops).filter(stop => mapProvider === 'mock' || isVerifiedPlace(stop)),
+        day.routes.filter((route) => route.visible).flatMap((route) => route.stops).filter(hasCoordinates).filter(stop => mapProvider === 'mock' || isVerifiedPlace(stop)),
       ),
     );
     setToast('行程已导入，可通过撤销恢复原行程');
@@ -651,7 +654,7 @@ function usePlannerState(initialLibrary?: Promise<SavedLibrary>) {
       setFocusedDayId(id);
       const day = data.trip.days.find(day => day.id === id);
       setExpandedRoutes(new Set(day?.routes.map(route => route.id) ?? []));
-      const stops = day?.routes.filter(route => route.visible).flatMap(route => route.stops).filter(stop => mapProvider === 'mock' || isVerifiedPlace(stop)) ?? [];
+      const stops = day?.routes.filter(route => route.visible).flatMap(route => route.stops).filter(hasCoordinates).filter(stop => mapProvider === 'mock' || isVerifiedPlace(stop)) ?? [];
       if (stops.length) mapService.fitView(stops);
       else if (day?.city) mapService.panTo(day.city, 11);
     },

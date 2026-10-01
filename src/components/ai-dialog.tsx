@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { BookOpen, Cpu, FilePenLine, RefreshCw, Plug, Sparkles } from 'lucide-react';
 import { Modal } from './ui';
 import { usePlanner } from '@/hooks/use-planner';
-import { applyCandidate, candidateDay, validateCandidate, type Candidate, type OptimizeOptions } from '@/lib/optimization';
+import { applyCandidate, candidateDay, validateCandidate, MAX_OPTIMIZATION_NOTE_LENGTH, type Candidate, type OptimizeOptions } from '@/lib/optimization';
 import { optimizationCost, type OptimizationCost } from '@/services/optimization-cost';
 import { dayConnections } from '@/lib/connections';
 import { GlassSelect } from './glass-select';
@@ -35,6 +35,7 @@ export function AIDialog({ onClose }: { onClose: () => void }) {
   const [referenceError, setReferenceError] = useState('');
   const [useReferences, setUseReferences] = useState(false);
   const [referenceIds, setReferenceIds] = useState<string[]>([]);
+  const [referenceDraft, setReferenceDraft] = useState({ name: '', text: '', editing: false });
   const mounted = useRef(true);
   const generation = useRef(0);
   const latest = useRef(p.data); latest.current = p.data;
@@ -97,11 +98,11 @@ export function AIDialog({ onClose }: { onClose: () => void }) {
     setMessage(improved ? '候选已通过地点、约束及高德道路核验；这是一份启发式建议。' : '候选未改善所选目标，保留原方案。可尝试调整约束。');
   });
   const cost = (value: OptimizationCost) => `${(value.distance / 1000).toFixed(2)} 公里 · ${Math.round(value.duration / 60)} 分钟`;
-  return <Modal title="AI 路线助手" onClose={onClose} className="ai-dialog">
+  return <Modal title="AI 路线助手" onClose={onClose} className="ai-dialog ai-route-assistant">
     <div className="ai-tabs" role="tablist" aria-label="AI 助手功能">
       {([{ id: 'optimize', label: '优化路线', Icon: Sparkles }, { id: 'config', label: 'AI 配置', Icon: Cpu }, { id: 'prompt', label: '自定义提示词', Icon: FilePenLine }, { id: 'references', label: '攻略参考库', Icon: BookOpen }] as const).map(({ id, label, Icon }) => <button key={id} role="tab" aria-selected={tab === id} aria-controls={`ai-panel-${id}`} id={`ai-tab-${id}`} disabled={busy} className={tab === id ? 'active' : ''} onClick={() => { setTab(id); setMessage(''); }}><Icon size={16} />{label}</button>)}
     </div>
-    <div role="tabpanel" id={`ai-panel-${tab}`} aria-labelledby={`ai-tab-${tab}`}>
+    <div key={tab} className="ai-tab-panel" role="tabpanel" id={`ai-panel-${tab}`} aria-labelledby={`ai-tab-${tab}`} tabIndex={0}>
     {tab === 'config' ? <div className="ai-form">
       <p className="ai-note">密钥仅保存在本机服务端，不写入行程文件。请求由本机转发给你配置的模型服务。更换 API 地址后须重新填写密钥。</p>
       {config && <>
@@ -123,15 +124,23 @@ export function AIDialog({ onClose }: { onClose: () => void }) {
       </>}
     </div> : tab === 'references' ? <>
       {referenceError && <p className="ai-message" role="alert">{referenceError} <button disabled={busy} onClick={() => void perform(refreshReferences)}>重试</button></p>}
-      <AIReferenceLibrary planId={p.data.trip.id} planName={p.data.trip.name} references={references} busy={busy || !!referenceError} loading={loadingReferences} refresh={refreshReferences} perform={perform} changed={invalidate} />
+      <AIReferenceLibrary planId={p.data.trip.id} planName={p.data.trip.name} references={references} busy={busy || !!referenceError} loading={loadingReferences} refresh={refreshReferences} perform={perform} changed={invalidate} draft={referenceDraft} setDraft={setReferenceDraft} />
     </> : <div className="ai-form">
       <p className="ai-note">生成建议会将所选路线的地点名称、ID、坐标及交通方式发送给配置的 AI 服务。高德核算道路距离与预计时间；不推测营业时间。</p>
       <fieldset disabled={busy}>
         <div className="ai-grid"><label>日期范围<GlassSelect label="日期范围" value={dayId} disabled={busy} onChange={value => { setDayId(value); setRouteId(p.data.trip.days.find(d => d.id === value)?.routes[0]?.id ?? ''); change({ lockedIds: [] }); }} options={p.data.trip.days.map(d => ({ value: d.id, label: d.name, detail: `${d.date} · ${d.routes.length} 条路线` }))} /></label><label>优化范围<GlassSelect label="优化范围" value={options.scope} disabled={busy} onChange={value => change({ scope: value as OptimizeOptions['scope'], allowRouteReorder: false, lockedIds: [] })} options={[{ value: 'route', label: '单条路线', detail: '仅调整选中路线内的地点顺序' }, { value: 'day', label: '同 Day 各路线联合建议', detail: '同时考虑当天路线与转场' }]} /></label></div>
         {options.scope === 'route' && <label>路线<GlassSelect label="路线" value={routeId} disabled={busy} onChange={value => { setRouteId(value); change({ lockedIds: [] }); }} options={(day?.routes ?? []).map(r => ({ value: r.id, label: r.name, detail: `${{ driving: '驾车', walking: '步行', riding: '骑行' }[r.mode]} · ${r.stops.length} 个地点` }))} /></label>}
         <label>优化目标<GlassSelect label="优化目标" value={options.objective} disabled={busy} onChange={value => change({ objective: value as OptimizeOptions['objective'] })} options={[{ value: 'duration', label: '优先减少预计交通时间', detail: '以高德预计耗时比较方案' }, { value: 'distance', label: '优先减少道路距离', detail: '以真实道路总长度比较方案' }]} /></label>
+        <label htmlFor="ai-optimization-note">自定义语句（可选）<textarea id="ai-optimization-note" className="ai-optimization-note" rows={2} maxLength={MAX_OPTIMIZATION_NOTE_LENGTH} value={options.customInstructions ?? ''} onChange={e => change({ customInstructions: e.target.value })} placeholder="例如：先逛景点，再集中安排附近的美食，尽量少折返。" aria-describedby="ai-optimization-note-help" /></label>
+        <div className="ai-prompt-meta"><span id="ai-optimization-note-help">用于本次建议，仍遵守下方约束和所选优化目标。</span><span>{options.customInstructions?.length ?? 0} / {MAX_OPTIMIZATION_NOTE_LENGTH}</span></div>
         <div className="ai-checks"><label><input type="checkbox" checked={options.fixedStart} onChange={e => change({ fixedStart: e.target.checked })} />固定各路线起点</label><label><input type="checkbox" checked={options.fixedEnd} onChange={e => change({ fixedEnd: e.target.checked })} />固定各路线终点</label>{options.scope === 'day' && <label><input type="checkbox" checked={options.allowRouteReorder} onChange={e => change({ allowRouteReorder: e.target.checked })} />允许调整路线顺序</label>}</div>
-        <details><summary>锁定地点相对顺序 · {options.lockedIds.length} 个</summary><div className="ai-locks">{selected.flatMap(r => r.stops.map(s => <label key={s.id}><input type="checkbox" checked={options.lockedIds.includes(s.id)} onChange={e => change({ lockedIds: e.target.checked ? [...options.lockedIds, s.id] : options.lockedIds.filter(id => id !== s.id) })} />{r.name} · {s.name}</label>))}</div></details>
+        <details className="ai-order-constraints"><summary>保留地点先后顺序 · 已选 {options.lockedIds.length} 个</summary>
+          <p className="ai-note">勾选同一路线的两个或以上地点，可保留它们原有的先后顺序，但不固定在原位置。起终点是否固定，由上方选项决定。</p>
+          <div className="ai-locks">{selected.map(r => <section key={r.id} className="ai-lock-route"><h4>{r.name}</h4>{r.stops.map((s, index) => {
+            const fixed = [options.fixedStart && index === 0 ? '起点已固定' : '', options.fixedEnd && index === r.stops.length - 1 ? '终点已固定' : ''].filter(Boolean).join(' · ');
+            return <label key={s.id}><input type="checkbox" checked={options.lockedIds.includes(s.id)} onChange={e => change({ lockedIds: e.target.checked ? [...options.lockedIds, s.id] : options.lockedIds.filter(id => id !== s.id) })} /><span className="ai-stop-number">{index + 1}</span><span className="ai-lock-name">{s.name}</span>{fixed && <small>{fixed}</small>}</label>;
+          })}</section>)}</div>
+        </details>
         <p className="ai-note">沿用各路线交通方式及已有相邻转场设置。若允许路线重排，新相邻转场默认开启并继承前一条路线的交通方式，具体变化会在预览显示。不跨天、不跨路线移动地点，不增删地点。最多 8 条路线、40 个地点。</p>
       </fieldset>
       <section className="ai-reference-choice">
@@ -148,7 +157,7 @@ export function AIDialog({ onClose }: { onClose: () => void }) {
         <button className="ai-primary" disabled={!!stale || !preview.improved || busy} onClick={() => { if (JSON.stringify(p.data) !== preview.snapshot) return; p.commit(current => JSON.stringify(current) === preview.snapshot ? applyCandidate(current, preview.snapshot, preview.dayId, preview.candidate) : current); p.setToast('AI 建议已应用，可一次撤销'); onClose(); }}>应用建议 · 可撤销</button>
       </section>}
     </div>}
-    </div>
     {message && <p className="ai-message" role="status">{message}</p>}
+    </div>
   </Modal>;
 }

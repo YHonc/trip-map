@@ -102,7 +102,7 @@ function DayItem({ day, index, dragging }: { day: Day; index: number; dragging: 
     data: { type: 'day', dayId: day.id },
   });
   const date = new Date(`${day.date}T12:00:00`);
-  const dateText = `${date.getMonth() + 1}月${date.getDate()}日 · 周${'日一二三四五六'[date.getDay()]}`;
+  const dateText = day.date ? `${date.getMonth() + 1}月${date.getDate()}日 · 周${'日一二三四五六'[date.getDay()]}` : '日期待定';
   const toggle = () => open ? p.toggleDay(day.id) : p.selectDayOnly(day.id);
   return (
     <section

@@ -38,7 +38,10 @@ export function saveMapConfig(value: Record<string, unknown>) {
     if (!Number.isInteger(n) || n < 1 || n > 43200) throw new Error('分类有效期应为 1–43200 分钟');
     ttl[kind] = n;
   }
-  const next: MapConfig = { provider: value.provider, baseURL, jsKey: secret('jsKey'), webKey: secret('webKey'), securityCode: secret('securityCode'), revision: randomUUID(), cache: { enabled: policy.enabled, maxMB: policy.maxMB, ttl } };
+  const next: MapConfig = { provider: value.provider, baseURL, jsKey: secret('jsKey'), webKey: secret('webKey'), securityCode: secret('securityCode'), revision: current.revision, cache: { enabled: policy.enabled, maxMB: policy.maxMB, ttl } };
+  const unchanged = next.provider === current.provider && next.baseURL === current.baseURL && next.jsKey === current.jsKey && next.webKey === current.webKey && next.securityCode === current.securityCode && next.cache.enabled === current.cache.enabled && next.cache.maxMB === current.cache.maxMB && (Object.keys(ttl) as CacheKind[]).every(kind => ttl[kind] === current.cache.ttl[kind]);
+  if (unchanged && readConfigFile<MapConfig>('map-config.json', ['webKey', 'securityCode'])) return publicMapConfig();
+  if (!unchanged) next.revision = randomUUID();
   writeConfigFile('map-config.json', next, ['webKey', 'securityCode']);
   return publicMapConfig();
 }

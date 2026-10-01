@@ -64,7 +64,7 @@ test('local AI endpoints refuse cross-origin and remote hosts', () => {
 });
 test('route metadata edits preserve geometry fingerprint; coordinate changes invalidate it', () => {
   assert.equal(routingFingerprint(route.mode, route.stops), routingFingerprint(route.mode, route.stops.map(s => ({ ...s, name: 'new', order: 99 }))));
-  assert.notEqual(routingFingerprint(route.mode, route.stops), routingFingerprint(route.mode, route.stops.map(s => ({ ...s, lng: s.lng + 0.01 }))));
+  assert.notEqual(routingFingerprint(route.mode, route.stops), routingFingerprint(route.mode, route.stops.map(s => { assert.notEqual(s.lng, null); return { ...s, lng: s.lng! + 0.01 }; })));
 });
 test('more than 256 pending segments still share one request and obey concurrency limit', async () => {
   const original = globalThis.fetch;

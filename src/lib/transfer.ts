@@ -65,26 +65,28 @@ export function validatePlannerData(value: unknown): ImportResult {
   };
   const place = (value: unknown, path: string): Place => {
     const p = object(value, path);
-    if (typeof p.lng !== 'number' || !Number.isFinite(p.lng) || p.lng < -180 || p.lng > 180)
+    const missingCoordinates = p.lng == null || p.lat == null;
+    if (p.lng != null && (typeof p.lng !== 'number' || !Number.isFinite(p.lng) || p.lng < -180 || p.lng > 180))
       fail(`${path}.lng`, '经度应为 -180 至 180 的数字');
-    if (typeof p.lat !== 'number' || !Number.isFinite(p.lat) || p.lat < -90 || p.lat > 90)
+    if (p.lat != null && (typeof p.lat !== 'number' || !Number.isFinite(p.lat) || p.lat < -90 || p.lat > 90))
       fail(`${path}.lat`, '纬度应为 -90 至 90 的数字');
+    if (missingCoordinates) warnings.add('缺少坐标的地点已保留为待确认地点；确认位置前不绘点或计算所在路线。');
     return {
       id: id(p.id, `${path}.id`),
       name: string(p.name, `${path}.name`),
       address: optionalText(p.address, `${path}.address`, ''),
       category: optionalText(p.category, `${path}.category`, '地点'),
-      lng: p.lng as number,
-      lat: p.lat as number,
-      ...(p.provider !== undefined ? { provider: (() => {
+      lng: p.lng == null ? null : p.lng as number,
+      lat: p.lat == null ? null : p.lat as number,
+      ...(p.provider != null ? { provider: (() => {
         if (!['mock', 'amap', 'unknown'].includes(String(p.provider))) fail(path, '未知地图来源');
         return p.provider as Place['provider'];
       })() } : {}),
-      ...(p.coordinateSystem !== undefined ? { coordinateSystem: (() => {
+      ...(p.coordinateSystem != null ? { coordinateSystem: (() => {
         if (!['GCJ-02', 'demo', 'unknown'].includes(String(p.coordinateSystem))) fail(path, '未知坐标系');
         return p.coordinateSystem as Place['coordinateSystem'];
       })() } : {}),
-      ...(p.poiId !== undefined ? { poiId: id(p.poiId, `${path}.poiId`) } : {}),
+      ...(p.poiId != null ? { poiId: id(p.poiId, `${path}.poiId`) } : {}),
       ...(p.locationSource !== undefined ? { locationSource: (() => {
         if (p.locationSource !== 'map-click' || p.provider !== 'amap' || p.coordinateSystem !== 'GCJ-02') fail(path, '地图选点来源无效');
         return 'map-click' as const;
@@ -109,12 +111,14 @@ export function validatePlannerData(value: unknown): ImportResult {
     const path = `trip.days[${dayIndex}]`,
       d = object(value, path),
       dayColor = color(d.color, COLORS[dayIndex % COLORS.length], `${path}.color`);
-    const date = string(d.date, `${path}.date`);
+    if (d.date != null && typeof d.date !== 'string') fail(`${path}.date`, '应为 YYYY-MM-DD 日期，或留空表示日期待定');
+    const date = typeof d.date === 'string' ? d.date.trim() : '';
+    if (!date) warnings.add('未填写的日期保留为“日期待定”，可稍后设置。');
     const parsedDate = new Date(`${date}T12:00:00Z`);
     if (
-      !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+      date && (!/^\d{4}-\d{2}-\d{2}$/.test(date) ||
       Number.isNaN(parsedDate.getTime()) ||
-      parsedDate.toISOString().slice(0, 10) !== date
+      parsedDate.toISOString().slice(0, 10) !== date)
     )
       fail(`${path}.date`, '应为有效的 YYYY-MM-DD 日期');
     const routes: Route[] = list(d.routes, `${path}.routes`, 100).map((value, routeIndex) => {
@@ -132,10 +136,10 @@ export function validatePlannerData(value: unknown): ImportResult {
           p = place(raw, sp);
         unique(p.id, stopIds, `${sp}.id`);
         if (raw.order !== order) warnings.add('地点顺序已按数组排列重新编号。');
-        if (raw.placeId === undefined) warnings.add('旧格式地点缺少 placeId，已沿用该地点的 ID。');
+        if (raw.placeId == null) warnings.add('旧格式地点缺少 placeId，已沿用该地点的 ID。');
         return {
           ...p,
-          placeId: raw.placeId === undefined ? p.id : id(raw.placeId, `${sp}.placeId`),
+          placeId: raw.placeId == null ? p.id : id(raw.placeId, `${sp}.placeId`),
           order,
         };
       });
