@@ -1,4 +1,5 @@
 import { project as projectDemo } from './map-geometry';
+import { routeLineStyle } from './route-style';
 import { exportMapPoint, type ExportBasemap } from './export-map';
 import { dayStopOffset } from './planner';
 import { dayConnections } from './connections';
@@ -55,7 +56,8 @@ export function createRouteMapSvg(data: PlannerData, basemap: string | ExportBas
         .map(project)
         .map((p) => `${p.x},${p.y}`)
         .join(' ');
-      return `<polyline points="${path}" fill="none" stroke="white" stroke-width="8" vector-effect="non-scaling-stroke" stroke-linejoin="round"/><polyline points="${path}" fill="none" stroke="${escapeXml(day.color)}" stroke-width="4" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"/>`;
+      const style = routeLineStyle();
+      return `<polyline points="${path}" fill="none" stroke="${style.outlineColor}" stroke-width="${style.casingWidth}" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"/><polyline points="${path}" fill="none" stroke="${escapeXml(day.color)}" stroke-width="${style.width}" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"/>`;
       }).join('');
     })
     .join('');

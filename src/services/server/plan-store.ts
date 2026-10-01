@@ -1,10 +1,12 @@
 import { database } from './database';
+import { ensureReferenceTable } from './reference-table';
 import { parsePlannerData } from '@/lib/transfer';
 import type { PlannerData } from '@/lib/types';
 export type PlanLibrary = { revision: number; currentId: string; plans: PlannerData[] };
 function db() {
   const value = database('data.sqlite');
   value.exec('CREATE TABLE IF NOT EXISTS library (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS backups (id INTEGER PRIMARY KEY, created_at INTEGER NOT NULL, value TEXT NOT NULL)');
+  ensureReferenceTable(value);
   return value;
 }
 export function loadLibrary(): PlanLibrary {
@@ -25,6 +27,7 @@ export function saveLibrary(input: Record<string, unknown>): PlanLibrary {
     db().prepare('DELETE FROM backups WHERE id NOT IN (SELECT id FROM backups ORDER BY id DESC LIMIT 20)').run();
     const revision = current.revision + 1;
     db().prepare('INSERT INTO library(id,revision,value) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,value=excluded.value').run(revision, value);
+    for (const old of current.plans) if (!plans.some(p => p.trip.id === old.trip.id)) db().prepare('DELETE FROM ai_references WHERE plan_id=?').run(old.trip.id);
     return { revision, currentId: input.currentId as string, plans };
   })();
 }

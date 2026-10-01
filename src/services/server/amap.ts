@@ -43,7 +43,7 @@ export function detailAmap(id: string, fetcher: typeof fetch = fetch) {
     if (fetcher === fetch) await waitForAmapSlot();
     const url = new URL(`${config.baseURL}/v3/place/detail`);
     url.search = new URLSearchParams({ key: config.webKey, id, extensions: 'base', output: 'JSON' }).toString();
-    markUpstreamRequest();
+    markUpstreamRequest('detail');
     const response = await fetcher(url, { signal: AbortSignal.timeout(10000), cache: 'no-store', redirect: 'error' });
     if (!response.ok) throw new Error('地点详情服务暂不可用');
     const place = parseAmapPlaces(await response.json()).find(place => place.poiId === id);
@@ -63,7 +63,7 @@ export function reverseAmap(point: Coordinate, fetcher: typeof fetch = fetch): P
     if (fetcher === fetch) await waitForAmapSlot();
     const url = new URL(`${config.baseURL}/v3/geocode/regeo`);
     url.search = new URLSearchParams({ key: config.webKey, location, extensions: 'base', output: 'JSON' }).toString();
-    markUpstreamRequest();
+    markUpstreamRequest('regeo');
     const response = await fetcher(url, { signal: AbortSignal.timeout(10000), cache: 'no-store', redirect: 'error' });
     if (!response.ok) throw new Error('地址查询服务暂不可用');
     return parseAmapAddress(await response.json());
@@ -83,7 +83,7 @@ async function routeUncached(origin: Coordinate, destination: Coordinate, mode: 
   const url = new URL(`${config.baseURL}/${paths[mode]}`);
   const coordinate = (p: Coordinate) => `${p.lng.toFixed(6)},${p.lat.toFixed(6)}`;
   url.search = new URLSearchParams({ key, origin: coordinate(origin), destination: coordinate(destination), output: 'JSON' }).toString();
-  markUpstreamRequest();
+  markUpstreamRequest(mode);
   const response = await fetcher(url, { signal: AbortSignal.timeout(10_000), cache: 'no-store', redirect: 'error' });
   if (!response.ok) throw new Error('高德规划服务暂不可用');
   return parseAmapRoute(await response.json(), mode, origin, destination);
@@ -104,7 +104,7 @@ async function searchUncached(keyword: string, fetcher: typeof fetch, city: stri
   if (fetcher === fetch) await waitForAmapSlot();
   const url = new URL(`${config.baseURL}/v3/place/text`);
   url.search = new URLSearchParams({ key, keywords: keyword.trim(), offset: '20', page: '1', extensions: 'base', output: 'JSON', ...(city ? { city, citylimit: 'true' } : {}) }).toString();
-  markUpstreamRequest();
+  markUpstreamRequest('search');
   const response = await fetcher(url, { signal: AbortSignal.timeout(10_000), cache: 'no-store', redirect: 'error' });
   if (!response.ok) throw new Error('高德搜索服务暂不可用');
   return parseAmapPlaces(await response.json());

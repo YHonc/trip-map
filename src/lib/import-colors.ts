@@ -3,8 +3,9 @@ import type { PlannerData } from './types';
 
 export function importedDayColor(index: number): string {
   if (index < COLORS.length) return COLORS[index];
-  const hue = ((index - COLORS.length) * 137.508 + 45) % 360;
-  const saturation = (60 + index % 3 * 9) / 100, lightness = (39 + Math.floor(index / 3) % 3 * 7) / 100;
+  // Avoid the yellow/orange hues used by road basemaps, including for long trips.
+  const hue = 150 + ((index - COLORS.length) * 137.508 + 25) % 200;
+  const saturation = (66 + index % 3 * 8) / 100, lightness = (33 + Math.floor(index / 3) % 3 * 5) / 100;
   const a = saturation * Math.min(lightness, 1 - lightness);
   const channel = (n: number) => {
     const k = (n + hue / 30) % 12;

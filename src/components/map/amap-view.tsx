@@ -1,4 +1,5 @@
 'use client';
+import { routeLineStyle } from '@/lib/route-style';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Expand, Shrink, LocateFixed, Minus, Plus } from 'lucide-react';
 import { usePlanner } from '@/hooks/use-planner';
@@ -149,7 +150,8 @@ export function AMapView({ drawerHeight }: { drawerHeight: number }) {
       const result = p.routeResults[route.id];
       if (result?.status === 'ready' && result.geometry?.path.length) {
         for (const path of result.geometry.paths ?? [result.geometry.path]) {
-          const line = new sdk.Polyline({ path: path.map(lngLat), strokeColor: day.color, strokeWeight: 4, strokeOpacity: p.selection.activeRouteId === route.id ? 1 : 0.55 });
+          const style = routeLineStyle(p.selection.activeRouteId === route.id);
+          const line = new sdk.Polyline({ path: path.map(lngLat), strokeColor: day.color, strokeWeight: style.width, strokeOpacity: style.opacity, isOutline: true, outlineColor: style.outlineColor, borderWeight: 2, lineJoin: 'round', lineCap: 'round', zIndex: style.zIndex, bubble: false });
           line.on('click', () => current.current.selectRoute(day.id, route.id, false));
           overlays.push(line);
         }

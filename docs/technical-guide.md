@@ -43,8 +43,8 @@ npm run desktop:build
 
 | 产物 | 用途 |
 | --- | --- |
-| `release/TripMap-Setup-1.2.1-x64.exe` | Windows 安装包 |
-| `release/TripMap-Portable-1.2.1-x64.exe` | 免安装便携包 |
+| `release/TripMap-Setup-1.3.0-x64.exe` | Windows 安装包 |
+| `release/TripMap-Portable-1.3.0-x64.exe` | 免安装便携包 |
 | `release/win-unpacked/` | 完整桌面程序，可通过根目录 `Start-TripMap.cmd` 启动 |
 | `.desktop-stage/` | 包含 Node 的独立网页运行目录 |
 
@@ -53,7 +53,7 @@ npm run desktop:build
 ```powershell
 npm run desktop:prepare
 New-Item -ItemType Directory -Force release | Out-Null
-Compress-Archive -Path .desktop-stage/* -DestinationPath release/TripMap-Web-1.2.1-x64.zip -Force
+Compress-Archive -Path .desktop-stage/* -DestinationPath release/TripMap-Web-1.3.0-x64.zip -Force
 ```
 
 解压后运行 `Start-Web.cmd`，访问 `http://127.0.0.1:32145`。保持服务窗口开启，按 Ctrl+C 停止。桌面与网页独立启动时各自需要可用端口，可通过 `TRIP_MAP_PORT` 修改，或关闭前一个服务后再启动。源码开发默认端口为 3000。
@@ -78,6 +78,18 @@ PNG／SVG 导出通过[高德官方静态地图接口](https://lbs.amap.com/api/
 
 ## 保存、迁移与浏览记忆
 
+### 提示词与攻略参考库
+
+「自定义提示词」保存到数据目录的 `ai-prompt.json`，供各旅行计划共用，与 AI 连接配置分开。最多 4,000 字符；保存后用于后续优化请求，已有地点与候选结构的校验规则仍由程序保持。
+
+TXT 攻略保存在 `data.sqlite` 的独立 `ai_references` 表，以计划 ID 隔离。每计划最多 20 份、总计 1 MB，每份最多 100 KB，支持 UTF-8 与 GBK。删除计划时在同一事务中清理其资料，计划保存冲突不会提前删除资料。
+
+优化默认不参考攻略。开启后每次最多选择 8 份；服务端根据地点名和中文分词提取相关段落，每份最多两段，总上下文最多 12,000 字符。未匹配内容不发送，建议预览展示实际发送片段及未命中的资料。资料正文作为上下文数据，不作为系统指令。
+
+JSON 行程导出不包含攻略库和自定义提示词。完整迁移时关闭服务并备份整个数据目录；删除资料后，重新导入行程 JSON 不会恢复资料。
+
+路线样式参考 [Mapbox Route line](https://docs.mapbox.com/android/navigation/guides/ui-components/route-line/) 的多层描边方式，用白色描边分隔道路底图，所选路线加粗；高德地图、演示地图和图片导出使用统一线宽定义。
+
 安装版、便携版与源码网页默认共用 `%LOCALAPPDATA%\TripMap`。便携版指免安装，数据仍位于统一用户目录。`TRIP_MAP_DATA_DIR` 可改用其他目录；非 Windows 源码运行默认使用 `~/.local/share/TripMap`。
 
 计划和当前计划 ID 保存在 SQLite，日期／路线选择、地图中心、缩放与图例偏好保存在当前浏览器或桌面会话。不同浏览器、不同端口的视图记忆分别保存。
@@ -86,7 +98,7 @@ PNG／SVG 导出通过[高德官方静态地图接口](https://lbs.amap.com/api/
 
 同一服务下多个窗口定期同步已保存版本，发生并发冲突时保留当前编辑并提示处理。文件级备份前应关闭所有服务，再复制整个数据目录；运行中优先使用 JSON 导出。最近 20 次库快照不能替代独立备份。具体目录与操作见[桌面版使用说明](../桌面版使用说明.md#数据与缓存)。
 
-## 地图缓存与底图
+## 地图缓存、API 用量与底图
 
 成功的城市、搜索与道路结果保存到 SQLite。默认策略如下，可在设置中修改或关闭：
 
@@ -99,9 +111,15 @@ PNG／SVG 导出通过[高德官方静态地图接口](https://lbs.amap.com/api/
 
 默认缓存内容容量为 128 MB。缓存按服务配置、请求参数、坐标系、方向与交通方式隔离；有效期内复用，过期请求重新获取，失败结果不缓存。设置页展示命中、未命中、请求合并与容量统计，清理缓存不会删除计划。
 
-已展示的路线不会按有效期自动刷新为实时路况，侧栏会标明计算时间；需要更新时可使用「清空缓存并重新获取」。缓存统计不等于服务商账单。
+已展示的路线不会按有效期自动刷新为实时路况，侧栏会标明计算时间；需要更新时可使用「清空缓存并重新获取」。
+
+「地图设置 → API 用量」按北京时间展示今日、累计和接口分类次数，记录在独立的 `map-usage.sqlite` 中。每次实际发起请求前计数，包含网络与服务错误；缓存命中、合并等待者和发送前拒绝不计入。重启、清理地图缓存和切换 Key 后保留累计记录，同一数据目录的各 Key 合并统计。
+
+分类包含搜索、地点详情、坐标地址、城市、驾车／步行／骑行、静态地图、连接测试及经过本机的 SDK 初始化／样式代理。浏览器直连底图与脚本不在本机统计范围；账号额度与账单以高德控制台为准。刷新用量只读本地记录。记录写入失败时，地图请求仍可继续，界面提示本次运行中的缺失次数。
 
 底图不进入 SQLite 缓存。高德 JS SDK 的底图只使用浏览器正常 HTTP 缓存，由上游响应头与浏览器决定复用时间，不提供离线瓦片下载或区域预加载。地图服务和数据受[高德开放平台服务协议](https://lbs.amap.com/pages/terms/)约束，缓存的启用、保存范围与期限须符合取得的授权。项目代码的 MIT 许可不授予高德数据或 SDK 的使用权。
+
+城市离线包、单文件 HTML 行程阅读器及本地算路仍处于方案阶段。当前可生成内嵌底图的 PNG／SVG，导出后的文件可直接离线查看。
 
 ## 开发检查与问题反馈
 
@@ -111,7 +129,7 @@ npm test
 npm run build
 ```
 
-`npm test` 使用隔离临时目录与替身响应，不调用真实高德／AI 服务。覆盖行程操作、导入导出、路线缓存、SQLite 持久化、并发冲突、配置保护、地图选点与浏览记忆。
+`npm test` 使用隔离临时目录与替身响应，不调用真实高德／AI 服务。覆盖行程操作、导入导出、路线缓存、SQLite 持久化、并发冲突、配置保护、地图选点、浏览记忆、攻略检索、提示词保存和 API 用量统计。
 
 成品检查入口为 `scripts/smoke-electron.cjs`、`scripts/smoke-portable.cjs` 和 `scripts/smoke-web-package.cjs`，检查启动、SQLite 保存、重启读回及退出清理。各版本实际验证范围见[发布构建与核验记录](releases/verification.md)。
 

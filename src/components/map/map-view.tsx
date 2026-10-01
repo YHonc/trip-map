@@ -1,4 +1,5 @@
 'use client';
+import { routeLineStyle } from '@/lib/route-style';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Expand, Shrink, LocateFixed, Minus, Plus } from 'lucide-react';
 import { usePlanner } from '@/hooks/use-planner';
@@ -292,12 +293,12 @@ function RoutePolyline({ day, route }: { day: Day; route: Route }) {
   const geometry = result?.geometry ?? fallback;
   if (route.stops.length < 2) return null;
   const active = p.selection.activeRouteId === route.id;
-  const dayActive = p.selection.activeDayId === day.id;
+  const style = routeLineStyle(active);
   const points = geometry.path
     .map(project)
     .map((p) => `${p.x},${p.y}`)
     .join(' ');
-  const opacity = result?.status === 'loading' ? 0.35 : active ? 1 : dayActive ? 0.7 : 0.32;
+  const opacity = result?.status === 'loading' ? 0.65 : style.opacity;
   return (
     <g
       className="route-polyline"
@@ -316,9 +317,9 @@ function RoutePolyline({ day, route }: { day: Day; route: Route }) {
       <polyline
         points={points}
         fill="none"
-        stroke="white"
-        strokeOpacity=".96"
-        strokeWidth={active ? 8 : 6}
+        stroke={style.outlineColor}
+        strokeOpacity="1"
+        strokeWidth={style.casingWidth}
         strokeLinecap="round"
         strokeLinejoin="round"
       />
@@ -327,7 +328,7 @@ function RoutePolyline({ day, route }: { day: Day; route: Route }) {
         fill="none"
         stroke={day.color}
         strokeOpacity={opacity}
-        strokeWidth={active ? 4.5 : 3.2}
+        strokeWidth={style.width}
         strokeLinecap="round"
         strokeLinejoin="round"
         filter={active ? 'url(#route-glow)' : undefined}

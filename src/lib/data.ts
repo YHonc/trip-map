@@ -1,5 +1,5 @@
 import { Day, Place, PlannerData, Stop } from './types';
-export const COLORS = ['#237bff', '#ff8b36', '#37ad73', '#8b46e8', '#ec6177', '#23a8b5'];
+export const COLORS = ['#2563eb', '#c026d3', '#0f766e', '#7c3aed', '#be123c', '#0369a1'];
 export const places: Place[] = [
   {
     id: 'hotel',

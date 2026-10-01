@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { dataFile } from './data-dir';
 const connections = new Map<string, Database.Database>();
-export function database(name: 'data.sqlite' | 'map-cache.sqlite') {
+export function database(name: 'data.sqlite' | 'map-cache.sqlite' | 'map-usage.sqlite') {
   const file = dataFile(name);
   let db = connections.get(file);
   if (!db) {

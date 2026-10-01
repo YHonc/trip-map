@@ -577,7 +577,7 @@ function usePlannerState(initialLibrary?: Promise<SavedLibrary>) {
   const deletePlan = (id: string) => {
     const target = updatePlanLibrary(latestPlans.current, latestData.current).find(plan => plan.trip.id === id);
     if (!target) return;
-    setDialog({ title: `删除「${target.trip.name}」？`, description: '将删除这个计划及其路线、收藏，无法撤销。删除最后一个计划后会创建一个空白计划。', destructive: true, onConfirm: () => {
+    setDialog({ title: `删除「${target.trip.name}」？`, description: '将删除这个计划及其路线、收藏和攻略参考库，无法撤销。删除最后一个计划后会创建一个空白计划。', destructive: true, onConfirm: () => {
       if (planOperation.current) return;
       planOperation.current = true; setPlanBusy(true);
       void (async () => {

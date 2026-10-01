@@ -16,7 +16,7 @@ export async function staticMapAmap(viewport: ExportViewport, fetcher: typeof fe
   if (fetcher === fetch) await waitForAmapSlot();
   const url = new URL(`${config.baseURL}/v3/staticmap`);
   url.search = new URLSearchParams({ key: config.webKey, location: `${viewport.center.lng.toFixed(6)},${viewport.center.lat.toFixed(6)}`, zoom: String(viewport.zoom), size: STATIC_MAP_SIZE, scale: '2', traffic: '0' }).toString();
-  markUpstreamRequest();
+  markUpstreamRequest('staticmap');
   let response: Response;
   try { response = await fetcher(url, { signal: AbortSignal.timeout(20000), cache: 'no-store', redirect: 'error' }); }
   catch { throw new Error('高德底图请求失败，请检查网络或地图服务地址后重试'); }

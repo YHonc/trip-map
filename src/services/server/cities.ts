@@ -21,7 +21,7 @@ export async function searchCities(keyword: string) {
     await waitForAmapSlot();
     const url = new URL(`${config.baseURL}/v3/config/district`);
     url.search = new URLSearchParams({ key, keywords: keyword.trim(), subdistrict: '0', extensions: 'base' }).toString();
-    markUpstreamRequest();
+    markUpstreamRequest('city');
     const response = await fetch(url, { cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(10_000) });
     if (!response.ok) throw new Error('城市查询暂不可用');
     return parseCities(await response.json());

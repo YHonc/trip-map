@@ -4,6 +4,7 @@ import { Modal } from './ui';
 import { GlassSelect } from './glass-select';
 import { usePlanner } from '@/hooks/use-planner';
 import type { PublicMapConfig, CacheKind } from '@/lib/map-config';
+import { MapUsagePanel } from './map-usage-panel';
 
 type Config = PublicMapConfig & { dataDirectory: string };
 type Stats = { groups: { kind: CacheKind; entries: number; bytes: number; latest: number }[]; counters: Record<string, number>; fileBytes: number; basemap: string };
@@ -34,8 +35,9 @@ export function MapSettings({ onClose }: { onClose: () => void }) {
     setConfig(result); setWebKey(''); setSecurityCode(''); setChanged(true);
   };
   return <Modal title="地图设置" onClose={() => { if (busy) return; if (changed) void perform(reload); else onClose(); }} className="ai-dialog map-settings">
-    <div className="ai-tabs"><button className={tab === 'config' ? 'active' : ''} onClick={() => setTab('config')}>地图 API</button><button className={tab === 'cache' ? 'active' : ''} onClick={() => setTab('cache')}>缓存与数据</button></div>
-    {config && <div className="ai-form"><fieldset disabled={busy}>
+    <div className="ai-tabs"><button className={tab === 'config' ? 'active' : ''} onClick={() => setTab('config')}>地图 API</button><button className={tab === 'cache' ? 'active' : ''} onClick={() => setTab('cache')}>缓存与数据</button><button className={tab === 'usage' ? 'active' : ''} onClick={() => setTab('usage')}>API 用量</button></div>
+    {tab === 'usage' && <div className="ai-form"><fieldset disabled={busy}><MapUsagePanel /></fieldset></div>}
+    {config && tab !== 'usage' && <div className="ai-form"><fieldset disabled={busy}>
       {tab === 'config' ? <>
         <label>地图模式<GlassSelect label="地图模式" value={config.provider} onChange={provider => setConfig({ ...config, provider: provider as 'mock' | 'amap' })} options={[{ value: 'mock', label: '演示地图（无需 Key）' }, { value: 'amap', label: '高德地图' }]} /></label>
         <label>高德 JS API Key<input value={config.jsKey} autoComplete="off" onChange={e => setConfig({ ...config, jsKey: e.target.value })} placeholder="Web 端 JS API 2.0 Key" /></label>

@@ -1,6 +1,7 @@
 import { readMapConfig, publicMapConfig } from '@/services/server/map-config';
 import { localRequest, noStore } from '@/services/server/local-http';
 import { checkBudget, waitForAmapSlot } from '@/services/server/amap';
+import { markUpstreamRequest } from '@/services/server/request-trace';
 export async function POST(request: Request) {
   try {
     localRequest(request);
@@ -9,6 +10,7 @@ export async function POST(request: Request) {
     checkBudget(); await waitForAmapSlot();
     const url = new URL(`${config.baseURL}/v3/config/district`);
     url.search = new URLSearchParams({ key: config.webKey, keywords: '110000', subdistrict: '0', extensions: 'base' }).toString();
+    markUpstreamRequest('test');
     const response = await fetch(url, { cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(10000) });
     const result = await response.json();
     if (!response.ok || result.status !== '1') throw new Error(`Web 服务连接失败${/^\d{5}$/.test(String(result.infocode)) ? `（错误码 ${result.infocode}）` : ''}`);

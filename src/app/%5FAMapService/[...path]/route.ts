@@ -1,6 +1,7 @@
 import { checkBudget } from '@/services/server/amap';
 import { readMapConfig } from '@/services/server/map-config';
 import { localRequest } from '@/services/server/local-http';
+import { markUpstreamRequest } from '@/services/server/request-trace';
 
 // The SDK needs only initialization and style services. POI calls use our typed API.
 const endpoints: Record<string, string> = {
@@ -27,6 +28,7 @@ export async function GET(request: Request, context: { params: Promise<{ path: s
     url.search = incoming.search;
     url.searchParams.set('key', config.jsKey);
     url.searchParams.set('jscode', config.securityCode);
+    markUpstreamRequest(path.join('/') === 'v3/log/init' ? 'sdk-init' : 'sdk-style');
     const result = await fetch(url, { signal: AbortSignal.timeout(10_000), cache: 'no-store', redirect: 'error' });
     if (!result.ok) return new Response('AMap unavailable', { status: 502 });
     return new Response(await result.text(), { headers: { 'Content-Type': callback ? 'application/javascript' : 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });

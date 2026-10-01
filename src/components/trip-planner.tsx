@@ -175,7 +175,7 @@ function PlannerWorkspace() {
       </DragOverlay>
       <PlannerDialogs />
       {transferOpen && <TransferDialog onClose={() => setTransferOpen(false)} />}
-      {aiOpen && <AIDialog onClose={() => setAiOpen(false)} />}
+      {aiOpen && <AIDialog key={p.data.trip.id} onClose={() => setAiOpen(false)} />}
       {settingsOpen && <MapSettings onClose={() => setSettingsOpen(false)} />}
       {!p.ready && <div className="startup-overlay"><LoadingPanel detail="正在恢复上次的计划与浏览位置" completed={1} /></div>}
       {p.planBusy && <div className="plan-operation-overlay" role="status">正在保存计划…</div>}
