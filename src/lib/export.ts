@@ -1,4 +1,5 @@
-import { project } from './map-geometry';
+import { project as projectDemo } from './map-geometry';
+import { exportMapPoint, type ExportBasemap } from './export-map';
 import { dayStopOffset } from './planner';
 import { dayConnections } from './connections';
 import type { PlannerData, RouteResult } from './types';
@@ -21,7 +22,10 @@ export function downloadBlob(blob: Blob, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
 /** Complete itinerary map, independent of the current pan, zoom, collapsed days, or visibility. */
-export function createRouteMapSvg(data: PlannerData, basemap = '', results: Record<string, RouteResult> = {}, transfers: Record<string, RouteResult> = {}): string {
+export function createRouteMapSvg(data: PlannerData, basemap: string | ExportBasemap = '', results: Record<string, RouteResult> = {}, transfers: Record<string, RouteResult> = {}): string {
+  const raster = typeof basemap === 'object' ? basemap : undefined;
+  if (raster && !/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(raster.dataUrl)) throw new Error('底图图片格式无效');
+  const project = raster ? (point: Parameters<typeof projectDemo>[0]) => exportMapPoint(point, raster) : projectDemo;
   const width = 1600,
     mapHeight = 850,
     legendRows = Math.max(1, Math.ceil(data.trip.days.length / 5)),
@@ -36,13 +40,13 @@ export function createRouteMapSvg(data: PlannerData, basemap = '', results: Reco
   const bounds = points.reduce((b, p) => ({ minX: Math.min(b.minX, p.x), maxX: Math.max(b.maxX, p.x), minY: Math.min(b.minY, p.y), maxY: Math.max(b.maxY, p.y) }),
     { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
   const { minX, maxX, minY, maxY } = points.length ? bounds : { minX: 100, maxX: 1100, minY: 100, maxY: 780 };
-  const scale = Math.min(
+  const scale = raster ? 1 : Math.min(
     basemap ? 1.6 : Infinity,
     (width - 600) / Math.max(10, maxX - minX),
     (mapHeight - 170) / Math.max(10, maxY - minY),
   );
-  const tx = width / 2 - ((minX + maxX) / 2) * scale,
-    ty = mapHeight / 2 - ((minY + maxY) / 2) * scale;
+  const tx = raster ? 0 : width / 2 - ((minX + maxX) / 2) * scale,
+    ty = raster ? 0 : mapHeight / 2 - ((minY + maxY) / 2) * scale;
   const lines = routes
     .map(({ day, geometry, route }) => {
       if (route.stops.length < 2 || !geometry) return '';
@@ -78,7 +82,7 @@ export function createRouteMapSvg(data: PlannerData, basemap = '', results: Reco
   const connectors = geometries
     .flatMap(geometry => geometry?.connectors ?? []).map(path => `<polyline points="${path.map(project).map(p => `${p.x},${p.y}`).join(' ')}" fill="none" stroke="#b7a088" stroke-width="1.5" stroke-dasharray="3 4" vector-effect="non-scaling-stroke"><title>非道路接驳，不计入路程</title></polyline>`).join('');
   const sources = new Set(geometries.filter(g => g?.path.length).map(g => g?.source));
-  const sourceLabel = sources.has('amap') ? `高德道路几何 · 不含高德底图${sources.has('mock') ? ' · 含 Mock 演示几何' : ''}` : sources.has('mock') ? 'Mock 演示几何' : '无已就绪道路几何';
+  const sourceLabel = `${raster ? '底图 © 高德地图 · ' : ''}${sources.has('amap') ? `高德道路几何${raster ? '' : ' · 不含高德底图'}${sources.has('mock') ? ' · 含 Mock 演示几何' : ''}` : sources.has('mock') ? 'Mock 演示几何' : '无已就绪道路几何'}`;
   const missing = routes.filter(r => r.route.stops.length > 1 && !r.geometry).length + connections.filter(c => transfers[c.id]?.status !== 'ready').length;
   const footer = `${sourceLabel} · 虚线：转场／非道路接驳 · ${missing} 段未就绪未绘制`;
   const legend = data.trip.days
@@ -88,7 +92,7 @@ export function createRouteMapSvg(data: PlannerData, basemap = '', results: Reco
       return `<circle cx="${x}" cy="${y}" r="7" fill="${escapeXml(day.color)}"/><text x="${x + 17}" y="${y + 5}" font-size="14" fill="#58708e">${escapeXml(day.name)} · ${escapeXml(day.date)} · ${day.routes.reduce((n, r) => n + r.stops.length, 0)} 个地点</text>`;
     })
     .join('');
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><style>text{font-family:'Segoe UI','Microsoft YaHei',sans-serif}.district-labels{fill:#8293a8;font-size:21px;font-weight:600;paint-order:stroke;stroke:#fff;stroke-width:3}.street-labels{fill:#a1b1bd;font-size:9px}</style><defs><clipPath id="export-map-clip"><rect x="0" y="0" width="${width}" height="${mapHeight}"/></clipPath></defs><rect width="100%" height="100%" fill="#f6faff"/><text x="40" y="50" font-size="28" fill="#172a4b" font-weight="650">${escapeXml(data.trip.name)}</text><text x="42" y="78" font-size="13" fill="#879ab0">完整路线图 · ${data.trip.days.length} 天 · ${routes.length} 条路线 · ${escapeXml(footer)}</text><g transform="translate(0 98)" clip-path="url(#export-map-clip)"><rect width="${width}" height="${mapHeight}" fill="#eef3f2"/><g transform="translate(${tx} ${ty}) scale(${scale})">${basemap}${lines}${connectionLines}${connectors}${markers}</g></g>${legend}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><style>text{font-family:'Segoe UI','Microsoft YaHei',sans-serif}.district-labels{fill:#8293a8;font-size:21px;font-weight:600;paint-order:stroke;stroke:#fff;stroke-width:3}.street-labels{fill:#a1b1bd;font-size:9px}</style><defs><clipPath id="export-map-clip"><rect x="0" y="0" width="${width}" height="${mapHeight}"/></clipPath></defs><rect width="100%" height="100%" fill="#f6faff"/><text x="40" y="50" font-size="28" fill="#172a4b" font-weight="650">${escapeXml(data.trip.name)}</text><text x="42" y="78" font-size="13" fill="#879ab0">完整路线图 · ${data.trip.days.length} 天 · ${routes.length} 条路线 · ${escapeXml(footer)}</text><g transform="translate(0 98)" clip-path="url(#export-map-clip)"><rect width="${width}" height="${mapHeight}" fill="#eef3f2"/><g transform="translate(${tx} ${ty}) scale(${scale})">${raster ? `<image width="${width}" height="${mapHeight}" href="${raster.dataUrl}"/>` : basemap}${lines}${connectionLines}${connectors}${markers}</g></g>${legend}</svg>`;
 }
 function loadSvg(svg: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -117,7 +121,7 @@ function wrapText(context: CanvasRenderingContext2D, text: string, maxWidth: num
   if (line) lines.push(line);
   return lines.length ? lines : [''];
 }
-export async function createPlanningPng(data: PlannerData, basemap = '', results: Record<string, RouteResult> = {}, transfers: Record<string, RouteResult> = {}): Promise<Blob> {
+export async function createPlanningPng(data: PlannerData, basemap: string | ExportBasemap = '', results: Record<string, RouteResult> = {}, transfers: Record<string, RouteResult> = {}): Promise<Blob> {
   await document.fonts.ready;
   const canvas = document.createElement('canvas'),
     context = canvas.getContext('2d');
@@ -233,7 +237,7 @@ export async function createPlanningPng(data: PlannerData, basemap = '', results
   context.drawImage(map, mapX, 158, mapWidth, mapHeight);
   context.font = '17px "Microsoft YaHei",sans-serif';
   context.fillStyle = '#8fa3bf';
-  context.fillText('包含所有路线与地点 · 地图为行程示意', mapX, 158 + mapHeight + 36);
+  context.fillText(typeof basemap === 'object' ? '包含所有路线与地点 · 底图 © 高德地图' : '包含所有路线与地点 · 地图为行程示意', mapX, 158 + mapHeight + 36);
   context.fillText('多日行程路线地图', gap, height - 30);
   return new Promise((resolve, reject) =>
     canvas.toBlob(

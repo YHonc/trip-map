@@ -16,6 +16,9 @@ import { parsePlannerData, serializePlannerData } from '@/lib/transfer';
 import type { PlannerData } from '@/lib/types';
 import { Modal } from './ui';
 import { mapProvider } from '@/services/map-service';
+import { mapFetch } from '@/services/map-request';
+import { exportViewport, type ExportBasemap } from '@/lib/export-map';
+import { colorImportedDays } from '@/lib/import-colors';
 
 export function TransferDialog({ onClose }: { onClose: () => void }) {
   const p = usePlanner();
@@ -29,7 +32,10 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
   const fileInput = useRef<HTMLInputElement>(null);
   const parsed = useMemo(() => {
     try {
-      return { ...parsePlannerData(draft), error: '' };
+      const result = parsePlannerData(draft);
+      const data = colorImportedDays(result.data);
+      const recolored = data.trip.days.some((day, index) => day.color !== result.data.trip.days[index].color || day.routes.some((route, r) => route.color !== result.data.trip.days[index].routes[r].color));
+      return { data, warnings: [...result.warnings, ...(recolored ? ['已为不同日期分配不同颜色，并同步当天路线颜色。'] : [])], error: '' };
     } catch (error) {
       return {
         data: null,
@@ -65,20 +71,31 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
     try {
       const { createRouteMapSvg, createPlanningPng, downloadBlob, safeFilename } =
         await import('@/lib/export');
-      const name = safeFilename(p.data.trip.name),
-        basemap = mapProvider === 'mock' ? document.querySelector('.cartography')?.outerHTML ?? '' : '';
+      const data = p.data, results = p.routeResults, transfers = p.transferResults;
+      const name = safeFilename(data.trip.name);
+      let basemap: string | ExportBasemap = '';
+      if (kind !== 'json') {
+        if (mapProvider === 'amap') {
+          const viewport = exportViewport(data, results, transfers);
+          const params = new URLSearchParams({ lng: String(viewport.center.lng), lat: String(viewport.center.lat), zoom: String(viewport.zoom) });
+          const response = await mapFetch(`/api/amap/static-map?${params}`, { signal: AbortSignal.timeout(30000) });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.error || '底图加载失败，请重试');
+          basemap = { ...viewport, dataUrl: payload.dataUrl };
+        } else basemap = document.querySelector('.cartography')?.outerHTML ?? '';
+      }
       if (kind === 'json')
         downloadBlob(
-          new Blob([serializePlannerData(p.data)], { type: 'application/json;charset=utf-8' }),
+          new Blob([serializePlannerData(data)], { type: 'application/json;charset=utf-8' }),
           `${name}.json`,
         );
       if (kind === 'map')
         downloadBlob(
-          new Blob([createRouteMapSvg(p.data, basemap, p.routeResults, p.transferResults)], { type: 'image/svg+xml;charset=utf-8' }),
+          new Blob([createRouteMapSvg(data, basemap, results, transfers)], { type: 'image/svg+xml;charset=utf-8' }),
           `${name}-路线图.svg`,
         );
       if (kind === 'png')
-        downloadBlob(await createPlanningPng(p.data, basemap, p.routeResults, p.transferResults), `${name}-规划.png`);
+        downloadBlob(await createPlanningPng(data, basemap, results, transfers), `${name}-规划.png`);
       p.setToast('导出文件已生成');
     } catch (error) {
       setExportError(error instanceof Error ? error.message : '导出失败，请重试。');
@@ -98,7 +115,7 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
           导出行程
         </button>
       </div>
-      {tab === 'export' && <p className="route-cost-summary">图片包含所有行程地点和已就绪路线；高德模式不导出底图，失败或未就绪路段不绘制。棕色虚线为非道路接驳，不计入预计路程。</p>}
+      {tab === 'export' && <p className="route-cost-summary">图片包含地图底图、所有行程地点和已就绪路线。高德模式导出时会加载完整行程范围的底图；未就绪路段不绘制。</p>}
       {tab === 'import' ? (
         <div role="tabpanel" aria-label="导入行程">
           <div className="transfer-toolbar">
@@ -208,7 +225,7 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
               </span>
               <span>
                 <strong>正常路线图</strong>
-                <small>SVG 矢量地图 · 包含全部路线与地点标记</small>
+                <small>SVG · 内嵌底图与矢量路线、地点标记</small>
               </span>
               {busy === 'map' ? (
                 <LoaderCircle className="spin" size={18} />
@@ -231,6 +248,7 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
               )}
             </button>
           </div>
+          {busy && busy !== 'json' && <p role="status" className="route-cost-summary">正在准备地图底图与导出图片…</p>}
           {exportError && (
             <p className="transfer-error" role="alert">
               {exportError}

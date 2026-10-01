@@ -43,8 +43,8 @@ npm run desktop:build
 
 | 产物 | 用途 |
 | --- | --- |
-| `release/TripMap-Setup-1.2.0-x64.exe` | Windows 安装包 |
-| `release/TripMap-Portable-1.2.0-x64.exe` | 免安装便携包 |
+| `release/TripMap-Setup-1.2.1-x64.exe` | Windows 安装包 |
+| `release/TripMap-Portable-1.2.1-x64.exe` | 免安装便携包 |
 | `release/win-unpacked/` | 完整桌面程序，可通过根目录 `Start-TripMap.cmd` 启动 |
 | `.desktop-stage/` | 包含 Node 的独立网页运行目录 |
 
@@ -53,7 +53,7 @@ npm run desktop:build
 ```powershell
 npm run desktop:prepare
 New-Item -ItemType Directory -Force release | Out-Null
-Compress-Archive -Path .desktop-stage/* -DestinationPath release/TripMap-Web-1.2.0-x64.zip -Force
+Compress-Archive -Path .desktop-stage/* -DestinationPath release/TripMap-Web-1.2.1-x64.zip -Force
 ```
 
 解压后运行 `Start-Web.cmd`，访问 `http://127.0.0.1:32145`。保持服务窗口开启，按 Ctrl+C 停止。桌面与网页独立启动时各自需要可用端口，可通过 `TRIP_MAP_PORT` 修改，或关闭前一个服务后再启动。源码开发默认端口为 3000。
@@ -70,7 +70,11 @@ Compress-Archive -Path .desktop-stage/* -DestinationPath release/TripMap-Web-1.2
 
 AI 助手支持 OpenAI 兼容接口地址、模型与 API Key。请求会将选中路线的地点、坐标和约束发送给所配置的 AI 服务。AI 生成顺序候选，真实道路成本由高德核算；预览列出变化，只有改善且当前行程未发生变化时才可应用。
 
-Mock 地点和路线是演示数据；高德模式使用 GCJ-02 坐标。演示／未知来源地点需通过搜索确认后才参与真实道路规划。请求失败或道路不可达时显示错误，不用演示路程替代。项目用于行程规划，不提供实时导航；PNG／SVG 路线图导出不包含高德底图。
+Mock 地点和路线是演示数据；高德模式使用 GCJ-02 坐标。演示／未知来源地点需通过搜索确认后才参与真实道路规划。请求失败或道路不可达时显示错误，不用演示路程替代。项目用于行程规划，不提供实时导航。
+
+PNG／SVG 导出通过[高德官方静态地图接口](https://lbs.amap.com/api/webservice/guide/api/staticmaps)获取整个行程范围的底图。SVG 内嵌 PNG 底图，并保留矢量路线和地点标记；PNG 规划图包含同一幅完整地图。底图使用 Web 服务 Key，在服务端请求，导出文件不包含密钥，保留底图自带的来源标识。请求失败时显示原因并允许重试，不生成缺失底图的高德图片。静态地图需要对应账号权限与额度；兼容网关需要支持该接口和高清图尺寸。
+
+底图仅按导出请求获取，不写入地图磁盘缓存，也不下载离线瓦片。导出与分享须遵守静态地图产品的授权和展示要求。导入配色只作用于导入预览和应用，不改变一般数据校验或保存；已导入的同色行程可在「导入 / 导出」中重新导入当前行程完成配色，并可撤销。
 
 ## 保存、迁移与浏览记忆
 
@@ -109,7 +113,7 @@ npm run build
 
 `npm test` 使用隔离临时目录与替身响应，不调用真实高德／AI 服务。覆盖行程操作、导入导出、路线缓存、SQLite 持久化、并发冲突、配置保护、地图选点与浏览记忆。
 
-成品检查入口为 `scripts/smoke-electron.cjs`、`scripts/smoke-portable.cjs` 和 `scripts/smoke-web-package.cjs`，检查启动、SQLite 保存、重启读回及退出清理。各版本实际验证范围见 [Release 说明](https://github.com/YHonc/trip-map/releases)。
+成品检查入口为 `scripts/smoke-electron.cjs`、`scripts/smoke-portable.cjs` 和 `scripts/smoke-web-package.cjs`，检查启动、SQLite 保存、重启读回及退出清理。各版本实际验证范围见[发布构建与核验记录](releases/verification.md)。
 
 部分 `scripts/browser-*.js` 是旧版浏览器验收脚本，可能使用真实服务或旧 localStorage 夹具。运行前阅读对应脚本，并使用独立数据目录与浏览器会话。替身测试不代表真实服务联调或完整安装／卸载验收。
 
