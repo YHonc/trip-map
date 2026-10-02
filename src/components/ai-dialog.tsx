@@ -3,9 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import { BookOpen, Cpu, FilePenLine, RefreshCw, Plug, Sparkles } from 'lucide-react';
 import { Modal } from './ui';
 import { usePlanner } from '@/hooks/use-planner';
-import { applyCandidate, candidateDay, validateCandidate, MAX_OPTIMIZATION_NOTE_LENGTH, type Candidate, type OptimizeOptions } from '@/lib/optimization';
+import { applyCandidate, candidateDay, validateCandidate, validateOptimizationOptions, MAX_OPTIMIZATION_NOTE_LENGTH, type Candidate, type OptimizeOptions } from '@/lib/optimization';
 import { optimizationCost, type OptimizationCost } from '@/services/optimization-cost';
-import { dayConnections } from '@/lib/connections';
 import { GlassSelect } from './glass-select';
 import { aiRequest as api } from '@/services/ai-request';
 import { MAX_PROMPT_LENGTH } from '@/lib/ai-prompt';
@@ -13,7 +12,8 @@ import { MAX_SELECTED_REFERENCES, type ReferenceInfo, type ReferenceExcerpt } fr
 import { AIReferenceLibrary } from './ai-reference-library';
 type Config = { protocol: 'openai'; baseURL: string; model: string; hasKey: boolean };
 type Preview = { snapshot: string; candidate: Candidate; before: OptimizationCost; after: OptimizationCost; dayId: string; improved: boolean; references: ReferenceExcerpt[]; unmatchedReferenceNames: string[] };
-const initialOptions: OptimizeOptions = { scope: 'route', objective: 'duration', fixedStart: true, fixedEnd: true, lockedIds: [], allowRouteReorder: false };
+const initialOptions: OptimizeOptions = { scope: 'route', objective: 'duration', fixedStart: false, fixedEnd: false, lockedIds: [], allowRouteReorder: false };
+const resetEndpoints = { startStopId: undefined, endStopId: undefined, lockedIds: [] };
 export function AIDialog({ onClose }: { onClose: () => void }) {
   const p = usePlanner();
   const initialDay = p.data.trip.days.find(day => day.id === p.selection.activeDayId) ?? p.data.trip.days[0];
@@ -22,7 +22,7 @@ export function AIDialog({ onClose }: { onClose: () => void }) {
   const [key, setKey] = useState('');
   const [models, setModels] = useState<string[]>([]);
   const [options, setOptions] = useState(initialOptions);
-  const [routeId, setRouteId] = useState(p.selection.activeRouteId ?? initialDay?.routes[0]?.id ?? '');
+  const [routeId, setRouteId] = useState(initialDay?.routes.find(route => route.id === p.selection.activeRouteId && route.visible && route.stops.length)?.id ?? initialDay?.routes.find(route => route.visible && route.stops.length)?.id ?? '');
   const [dayId, setDayId] = useState(p.selection.activeDayId ?? p.data.trip.days[0]?.id ?? '');
   const [preview, setPreview] = useState<Preview | null>(null);
   const [message, setMessage] = useState('');
@@ -61,7 +61,8 @@ export function AIDialog({ onClose }: { onClose: () => void }) {
     return () => { mounted.current = false; generation.current++; };
   }, []);
   const day = p.data.trip.days.find(d => d.id === dayId);
-  const selected = day?.routes.filter(r => options.scope === 'day' || r.id === routeId) ?? [];
+  const selected = day?.routes.filter(r => r.visible && r.stops.length && (options.scope === 'day' || r.id === routeId)) ?? [];
+  const endpointChoices = selected.flatMap(route => route.stops.map((stop, index) => ({ value: stop.id, label: stop.name, detail: `${route.name} · 第 ${index + 1} 站` })));
   const stale = preview && preview.snapshot !== JSON.stringify(p.data);
   const change = (patch: Partial<OptimizeOptions>) => { generation.current++; setOptions(o => ({ ...o, ...patch })); setPreview(null); };
   const perform = async (work: () => Promise<void>) => {
@@ -75,7 +76,8 @@ export function AIDialog({ onClose }: { onClose: () => void }) {
     const saved = await api('config', { ...config, apiKey: key }); setConfig(saved); setKey('');
   };
   const generate = () => perform(async () => {
-    if (!day || !selected.length || (selected.every(r => r.stops.length < 3) && !(options.allowRouteReorder && selected.length > 1))) throw new Error('请选择至少有三个地点的路线，或允许同 Day 多路线重排');
+    if (!day || !selected.length || (selected.every(r => r.stops.length < 2) && !(options.allowRouteReorder && selected.length > 1))) throw new Error('请选择至少有两个地点的路线，或选择当天行程并允许调整路线顺序');
+    validateOptimizationOptions(selected, options);
     if (selected.length > 8 || selected.reduce((n, r) => n + r.stops.length, 0) > 40) throw new Error('一次最多优化 8 条路线、40 个地点，请缩小范围');
     if (!config?.hasKey) { setTab('config'); throw new Error('请先配置 AI 服务'); }
     if (savedPrompt === null) { setTab('prompt'); throw new Error('请先加载提示词设置'); }
@@ -87,15 +89,15 @@ export function AIDialog({ onClose }: { onClose: () => void }) {
     const before = await optimizationCost(day, selected.map(r => r.id), current);
     if (!current()) throw new Error('行程已修改，请重新生成');
     setMessage('AI 正在建议地点顺序…');
-    const response = await api('optimize', { routes: selected, options, planId: p.data.trip.id, referenceIds: useReferences ? referenceIds : [] });
+    const response = await api('optimize', { routes: selected, options: { ...options, customInstructions: options.objective === 'custom' ? options.customInstructions : undefined }, planId: p.data.trip.id, referenceIds: useReferences ? referenceIds : [] });
     const candidate = validateCandidate(response, selected, options);
     if (!current()) throw new Error('行程已修改，请重新生成');
-    setMessage('正在用高德核验候选道路及转场…');
+    setMessage('正在用高德核验候选路程…');
     const after = await optimizationCost(candidateDay(day, candidate), selected.map(r => r.id), current);
     if (!current()) throw new Error('行程已修改，请重新生成');
-    const improved = after[options.objective] < before[options.objective] - (options.objective === 'duration' ? 1 : 1);
+    const improved = options.objective === 'custom' || after[options.objective] < before[options.objective] - 1;
     setPreview({ snapshot, candidate, before, after, dayId: day.id, improved, references: response.referenceExcerpts ?? [], unmatchedReferenceNames: response.unmatchedReferenceNames ?? [] });
-    setMessage(improved ? '候选已通过地点、约束及高德道路核验；这是一份启发式建议。' : '候选未改善所选目标，保留原方案。可尝试调整约束。');
+    setMessage(options.objective === 'custom' ? '候选已通过地点与约束核验。请结合排序理由和路程比较，决定是否符合你的自定义目标。' : improved ? '候选已通过地点、约束及高德路程核验；这是一份启发式建议。' : '候选未改善所选目标，保留原方案。可尝试调整约束。');
   });
   const cost = (value: OptimizationCost) => `${(value.distance / 1000).toFixed(2)} 公里 · ${Math.round(value.duration / 60)} 分钟`;
   return <Modal title="AI 路线助手" onClose={onClose} className="ai-dialog ai-route-assistant">
@@ -128,29 +130,32 @@ export function AIDialog({ onClose }: { onClose: () => void }) {
     </> : <div className="ai-form">
       <p className="ai-note">生成建议会将所选路线的地点名称、ID、坐标及交通方式发送给配置的 AI 服务。高德核算道路距离与预计时间；不推测营业时间。</p>
       <fieldset disabled={busy}>
-        <div className="ai-grid"><label>日期范围<GlassSelect label="日期范围" value={dayId} disabled={busy} onChange={value => { setDayId(value); setRouteId(p.data.trip.days.find(d => d.id === value)?.routes[0]?.id ?? ''); change({ lockedIds: [] }); }} options={p.data.trip.days.map(d => ({ value: d.id, label: d.name, detail: `${d.date} · ${d.routes.length} 条路线` }))} /></label><label>优化范围<GlassSelect label="优化范围" value={options.scope} disabled={busy} onChange={value => change({ scope: value as OptimizeOptions['scope'], allowRouteReorder: false, lockedIds: [] })} options={[{ value: 'route', label: '单条路线', detail: '仅调整选中路线内的地点顺序' }, { value: 'day', label: '同 Day 各路线联合建议', detail: '同时考虑当天路线与转场' }]} /></label></div>
-        {options.scope === 'route' && <label>路线<GlassSelect label="路线" value={routeId} disabled={busy} onChange={value => { setRouteId(value); change({ lockedIds: [] }); }} options={(day?.routes ?? []).map(r => ({ value: r.id, label: r.name, detail: `${{ driving: '驾车', walking: '步行', riding: '骑行' }[r.mode]} · ${r.stops.length} 个地点` }))} /></label>}
-        <label>优化目标<GlassSelect label="优化目标" value={options.objective} disabled={busy} onChange={value => change({ objective: value as OptimizeOptions['objective'] })} options={[{ value: 'duration', label: '优先减少预计交通时间', detail: '以高德预计耗时比较方案' }, { value: 'distance', label: '优先减少道路距离', detail: '以真实道路总长度比较方案' }]} /></label>
-        <label htmlFor="ai-optimization-note">自定义语句（可选）<textarea id="ai-optimization-note" className="ai-optimization-note" rows={2} maxLength={MAX_OPTIMIZATION_NOTE_LENGTH} value={options.customInstructions ?? ''} onChange={e => change({ customInstructions: e.target.value })} placeholder="例如：先逛景点，再集中安排附近的美食，尽量少折返。" aria-describedby="ai-optimization-note-help" /></label>
-        <div className="ai-prompt-meta"><span id="ai-optimization-note-help">用于本次建议，仍遵守下方约束和所选优化目标。</span><span>{options.customInstructions?.length ?? 0} / {MAX_OPTIMIZATION_NOTE_LENGTH}</span></div>
-        <div className="ai-checks"><label><input type="checkbox" checked={options.fixedStart} onChange={e => change({ fixedStart: e.target.checked })} />固定各路线起点</label><label><input type="checkbox" checked={options.fixedEnd} onChange={e => change({ fixedEnd: e.target.checked })} />固定各路线终点</label>{options.scope === 'day' && <label><input type="checkbox" checked={options.allowRouteReorder} onChange={e => change({ allowRouteReorder: e.target.checked })} />允许调整路线顺序</label>}</div>
+        <div className="ai-grid"><label>日期范围<GlassSelect label="日期范围" value={dayId} disabled={busy} onChange={value => { setDayId(value); setRouteId(p.data.trip.days.find(d => d.id === value)?.routes.find(r => r.visible && r.stops.length)?.id ?? ''); change(resetEndpoints); }} options={p.data.trip.days.map(d => ({ value: d.id, label: d.name, detail: `${d.date} · ${d.routes.length} 条路线` }))} /></label><label>优化范围<GlassSelect label="优化范围" value={options.scope} disabled={busy} onChange={value => change({ scope: value as OptimizeOptions['scope'], allowRouteReorder: value === 'day', ...resetEndpoints })} options={[{ value: 'route', label: '单条路线', detail: '调整选中路线内的地点顺序' }, { value: 'day', label: '当天行程', detail: '联合安排当天所有可见地点' }]} /></label></div>
+        {options.scope === 'route' && <label>路线<GlassSelect label="路线" value={routeId} disabled={busy} onChange={value => { setRouteId(value); change(resetEndpoints); }} options={(day?.routes ?? []).filter(r => r.visible && r.stops.length).map(r => ({ value: r.id, label: r.name, detail: `${{ driving: '驾车', walking: '步行', riding: '骑行', subway: '地铁' }[r.mode]} · ${r.stops.length} 个地点` }))} /></label>}
+        <label>优化目标<GlassSelect label="优化目标" value={options.objective} disabled={busy} onChange={value => change({ objective: value as OptimizeOptions['objective'] })} options={[{ value: 'duration', label: '优先减少预计交通时间', detail: '比较高德预计耗时' }, { value: 'distance', label: '优先减少路程距离', detail: '比较实际路线总长度' }, { value: 'custom', label: '自定义', detail: '按你的游览节奏和偏好安排' }]} /></label>
+        {options.objective === 'custom' && <div className="ai-custom-goal"><label htmlFor="ai-optimization-note">希望如何安排行程？<textarea id="ai-optimization-note" className="ai-optimization-note" rows={3} maxLength={MAX_OPTIMIZATION_NOTE_LENGTH} value={options.customInstructions ?? ''} onChange={e => change({ customInstructions: e.target.value })} placeholder="例如：先逛景点，再集中安排附近的美食，尽量少折返。" aria-describedby="ai-optimization-note-help" /></label><div className="ai-prompt-meta"><span id="ai-optimization-note-help">按你的要求建议顺序，并列出路程与耗时供比较。</span><span>{options.customInstructions?.length ?? 0} / {MAX_OPTIMIZATION_NOTE_LENGTH}</span></div></div>}
+        <div className="ai-endpoints ai-grid">{(['start', 'end'] as const).map(kind => {
+          const start = kind === 'start', enabled = start ? options.fixedStart : options.fixedEnd, value = start ? options.startStopId : options.endStopId, label = start ? '起点' : '终点';
+          const other = start ? options.fixedEnd && options.endStopId : options.fixedStart && options.startStopId;
+          return <section className={`ai-endpoint ${enabled ? 'enabled' : ''}`} key={kind}><label className="ai-inline-check"><input type="checkbox" checked={enabled} onChange={e => change(start ? { fixedStart: e.target.checked } : { fixedEnd: e.target.checked })} />固定{label}</label>{enabled ? <GlassSelect label={`选择固定${label}`} value={value ?? ''} placeholder={`选择${label}地点`} disabled={busy} options={endpointChoices.map(choice => ({ ...choice, disabled: choice.value === other }))} onChange={id => change({ ...(start ? { startStopId: id } : { endStopId: id }), ...(options.scope === 'day' ? { allowRouteReorder: true } : {}) })} /> : <p>由 AI 建议{label}地点</p>}</section>;
+        })}</div>
+        {options.scope === 'day' && <div className="ai-checks"><label><input type="checkbox" checked={options.allowRouteReorder} onChange={e => change({ allowRouteReorder: e.target.checked })} />允许调整路线顺序</label></div>}
         <details className="ai-order-constraints"><summary>保留地点先后顺序 · 已选 {options.lockedIds.length} 个</summary>
           <p className="ai-note">勾选同一路线的两个或以上地点，可保留它们原有的先后顺序，但不固定在原位置。起终点是否固定，由上方选项决定。</p>
           <div className="ai-locks">{selected.map(r => <section key={r.id} className="ai-lock-route"><h4>{r.name}</h4>{r.stops.map((s, index) => {
-            const fixed = [options.fixedStart && index === 0 ? '起点已固定' : '', options.fixedEnd && index === r.stops.length - 1 ? '终点已固定' : ''].filter(Boolean).join(' · ');
+            const fixed = [options.fixedStart && s.id === options.startStopId ? '起点已固定' : '', options.fixedEnd && s.id === options.endStopId ? '终点已固定' : ''].filter(Boolean).join(' · ');
             return <label key={s.id}><input type="checkbox" checked={options.lockedIds.includes(s.id)} onChange={e => change({ lockedIds: e.target.checked ? [...options.lockedIds, s.id] : options.lockedIds.filter(id => id !== s.id) })} /><span className="ai-stop-number">{index + 1}</span><span className="ai-lock-name">{s.name}</span>{fixed && <small>{fixed}</small>}</label>;
           })}</section>)}</div>
         </details>
-        <p className="ai-note">沿用各路线交通方式及已有相邻转场设置。若允许路线重排，新相邻转场默认开启并继承前一条路线的交通方式，具体变化会在预览显示。不跨天、不跨路线移动地点，不增删地点。最多 8 条路线、40 个地点。</p>
+        <p className="ai-note">沿用各路线交通方式，计入所选路线及进入它们的路程。隐藏地点不参与。不跨天、不跨路线移动地点，不增删地点。最多 8 条路线、40 个地点。</p>
       </fieldset>
       <section className="ai-reference-choice">
         <div className="ai-library-heading"><label className="ai-inline-check"><input type="checkbox" checked={useReferences} disabled={busy} onChange={e => { setUseReferences(e.target.checked); invalidate(); }} />参考攻略</label><button disabled={busy} onClick={() => setTab('references')}>管理参考库 · {references.length}</button></div>
         {useReferences && <><p className="ai-note">{p.data.trip.name} · 勾选本次要参考的资料（最多 8 份）</p>{referenceError ? <p role="alert" className="ai-note">{referenceError}</p> : loadingReferences ? <p className="ai-note">正在读取攻略…</p> : !references.length ? <p className="ai-note">这个计划还没有攻略，去“攻略参考库”导入 TXT。</p> : <div className="ai-reference-checks">{references.map(item => <label key={item.id}><input type="checkbox" checked={referenceIds.includes(item.id)} disabled={busy || (!referenceIds.includes(item.id) && referenceIds.length >= MAX_SELECTED_REFERENCES)} onChange={e => { setReferenceIds(ids => e.target.checked ? [...ids, item.id] : ids.filter(id => id !== item.id)); invalidate(); }} /><span>{item.name}</span><small>{item.chars.toLocaleString()} 字</small></label>)}</div>}</>}
       </section>
       <button className="ai-primary" disabled={busy || !selected.length} onClick={() => void generate()}><Sparkles size={16} />{busy ? '正在生成与核验…' : '生成 AI 建议'}</button>
-      {preview && <section className="ai-preview"><h3>方案比较</h3><p className="ai-note">包含所选路线及相邻已启用转场；交通时间为高德估计，不含停留与非道路接驳。</p><div className="ai-grid"><div>原方案<strong>{cost(preview.before)}</strong><small>其中转场 {(preview.before.transferDistance / 1000).toFixed(2)} 公里 / {Math.round(preview.before.transferDuration / 60)} 分钟</small></div><div>候选方案<strong>{cost(preview.after)}</strong><small>其中转场 {(preview.after.transferDistance / 1000).toFixed(2)} 公里 / {Math.round(preview.after.transferDuration / 60)} 分钟</small></div></div>
+      {preview && <section className="ai-preview"><h3>方案比较</h3><p className="ai-note">包含所选路线及接入路程；高德预计交通时间不含地点停留，地铁含步行接驳。</p><div className="ai-grid"><div>原方案<strong>{cost(preview.before)}</strong></div><div>候选方案<strong>{cost(preview.after)}</strong></div></div>
         {preview.candidate.routes.map(entry => { const r = day?.routes.find(r => r.id === entry.id); return <div key={entry.id} className="ai-order"><b>{r?.name}</b><p>原：{r?.stops.map(s => s.name).join(' → ')}</p><p>建议：{entry.stopIds.map(id => r?.stops.find(s => s.id === id)?.name).join(' → ')}</p></div>; })}
-        {day && !stale && <details><summary>查看转场变化（包含关闭的转场）</summary>{[day, candidateDay(day, preview.candidate)].map((d, i) => <div key={i}><b>{i ? '候选方案' : '原方案'}</b>{dayConnections(d).map(c => <p key={c.id}>{c.from.name} → {c.to.name}：{c.enabled ? { driving: '驾车', walking: '步行', riding: '骑行' }[c.mode] : '关闭'}</p>)}</div>)}</details>}
         <p>{preview.candidate.explanation}</p>{stale && <p role="alert">行程已编辑，候选已失效，请重新生成。</p>}
         {preview.unmatchedReferenceNames.length > 0 && <p className="ai-note">以下攻略未找到与所选地点相关的片段，本次未提供给模型：{preview.unmatchedReferenceNames.join('、')}。可在正文中补充对应地点名称后重新导入。</p>}
         {preview.references.length > 0 && <details className="ai-sent-references"><summary>查看本次提供的攻略片段 · {new Set(preview.references.map(item => item.sourceId)).size} 份资料</summary>{preview.references.map(item => <blockquote key={`${item.sourceId}:${item.chunk}`}><strong>{item.name} · 片段 {item.chunk}</strong><p>{item.text}</p></blockquote>)}</details>}

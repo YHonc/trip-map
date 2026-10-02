@@ -52,6 +52,21 @@ test('cache expiration, configuration namespace, direction and errors never reus
   await cachedMap('city', ['failure'], config, run);
   assert.equal(calls, 5);
 });
+test('default persistent driving cache refreshes exactly at the three-day boundary', async () => {
+  const originalNow = Date.now;
+  let clock = originalNow(), calls = 0;
+  Date.now = () => clock;
+  try {
+    const run = async () => ({ distance: ++calls, duration: 1, path: [] });
+    const first = await cachedMap('driving', ['three-day-boundary'], config, run);
+    clock += 3 * 86400000 - 1;
+    assert.deepEqual(await cachedMap('driving', ['three-day-boundary'], config, run), first);
+    assert.equal(calls, 1);
+    clock++;
+    await cachedMap('driving', ['three-day-boundary'], config, run);
+    assert.equal(calls, 2);
+  } finally { Date.now = originalNow; }
+});
 test('concurrent misses merge; clear during a request prevents late repopulation', async () => {
   clearMapCache();
   let calls = 0, release!: () => void;

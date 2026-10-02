@@ -8,19 +8,16 @@ import {
   Place,
   PlannerData,
   Route,
-  RouteResult,
   Selection,
   TravelMode,
 } from '@/lib/types';
 import { mapService, mapProvider } from '@/services/map-service';
 import { migrateData, isVerifiedPlace, hasCoordinates } from '@/lib/location';
-import { dayConnections } from '@/lib/connections';
 import { parsePlannerData } from '@/lib/transfer';
-import { routingFingerprint } from '@/lib/routing-fingerprint';
 import { selectedCity, setCity } from '@/lib/city';
 import type { City } from '@/lib/types';
 import { updatePlanLibrary } from '@/lib/plan-library';
-import type { RouteSegments } from '@/services/amap-routing';
+import { useItineraryCalculation } from './use-itinerary-calculation';
 import { legacyLibrary, readLibrary, writeLibrary, type SavedLibrary } from '@/services/plan-storage';
 import { readWorkspaceMemory, restoreSelection, writeWorkspaceMemory } from '@/lib/workspace-memory';
 
@@ -91,6 +88,7 @@ function usePlannerState(initialLibrary?: Promise<SavedLibrary>) {
   const [expandedDays, setExpandedDays] = useState(new Set(['day-1']));
   const [expandedRoutes, setExpandedRoutes] = useState(new Set(['route-1']));
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(null);
+  const [placeRevealRevision, setPlaceRevealRevision] = useState(0);
   const [placeSource, setPlaceSource] = useState<'planned' | 'favorite' | 'searchResult'>(
     'planned',
   );
@@ -100,59 +98,9 @@ function usePlannerState(initialLibrary?: Promise<SavedLibrary>) {
   const [cityTarget, setCityTarget] = useState<{ dayId: string; routeId?: string } | null>(null);
   const [repairOpen, setRepairOpen] = useState(false);
   const [searchFocus, setSearchFocus] = useState(0);
-  const [routeResults, setRouteResults] = useState<Record<string, RouteResult>>({});
-  const [transferResults, setTransferResults] = useState<Record<string, RouteResult>>({});
-  const routeSegments = useRef<Record<string, RouteSegments>>({});
-  const transferSegments = useRef<Record<string, RouteSegments>>({});
-  const transferVersions = useRef<Record<string, number>>({});
-  const transferFingerprints = useRef<Record<string, string>>({});
-  const [transferRetry, setTransferRetry] = useState(0);
-  const fingerprints = useRef<Record<string, string>>({});
-  const generations = useRef<Record<string, number>>({});
+  const calculation = useItineraryCalculation(data, ready, setToast);
   const latestData = useRef(data);
   latestData.current = data;
-  useEffect(() => () => {
-    Object.keys(generations.current).forEach(id => { generations.current[id] += 1; });
-    Object.keys(transferVersions.current).forEach(id => { transferVersions.current[id] += 1; });
-    fingerprints.current = {};
-    transferFingerprints.current = {};
-    routeSegments.current = {};
-    transferSegments.current = {};
-  }, []);
-  useEffect(() => {
-    if (!ready) return;
-    const connections = data.trip.days.flatMap(dayConnections).filter(c => c.enabled);
-    const live = new Set(connections.map(c => c.id));
-    for (const id of Object.keys(transferSegments.current)) if (!live.has(id)) delete transferSegments.current[id];
-    for (const id of Object.keys(transferFingerprints.current)) if (!live.has(id)) {
-      transferVersions.current[id] = (transferVersions.current[id] ?? 0) + 1;
-      delete transferFingerprints.current[id];
-      delete transferSegments.current[id];
-    }
-    connections.forEach(connection => {
-      const stops = [connection.from.stops.at(-1)!, connection.to.stops[0]];
-      const fingerprint = JSON.stringify([routingFingerprint(connection.mode, stops), transferRetry]);
-      if (transferFingerprints.current[connection.id] === fingerprint) return;
-      transferFingerprints.current[connection.id] = fingerprint;
-      const version = (transferVersions.current[connection.id] ?? 0) + 1;
-      transferVersions.current[connection.id] = version;
-      const isCurrent = () => {
-        const live = latestData.current.trip.days.flatMap(dayConnections).find(c => c.id === connection.id);
-        return transferVersions.current[connection.id] === version && !!live?.enabled && JSON.stringify([routingFingerprint(live.mode, [live.from.stops.at(-1)!, live.to.stops[0]]), transferRetry]) === fingerprint;
-      };
-      setTransferResults(prev => ({ ...prev, [connection.id]: { status: 'loading' } }));
-      void (async () => {
-        try {
-          if (!stops.every(hasCoordinates) || (mapProvider !== 'mock' && !stops.every(isVerifiedPlace))) throw new Error('转场端点待确认');
-          const calculate = { driving: mapService.calculateDrivingRoute, walking: mapService.calculateWalkingRoute, riding: mapService.calculateRidingRoute }[connection.mode];
-          const geometry = await calculate(stops, isCurrent, transferSegments.current[connection.id] ??= new Map());
-          if (isCurrent()) setTransferResults(prev => ({ ...prev, [connection.id]: { status: 'ready', geometry } }));
-        } catch (error) {
-          if (isCurrent()) setTransferResults(prev => ({ ...prev, [connection.id]: { status: 'error', error: error instanceof Error ? error.message : '转场规划失败' } }));
-        }
-      })();
-    });
-  }, [data, transferRetry, ready]);
   const commit = (update: (data: PlannerData) => PlannerData) => dispatch({ type: 'edit', update });
   useEffect(() => {
     let active = true;
@@ -280,56 +228,6 @@ function usePlannerState(initialLibrary?: Promise<SavedLibrary>) {
           : current,
       );
   }, [data, placeSource, focusedDayId]);
-  const recalculateRoute = async (routeId: string) => {
-    const route = latestData.current.trip.days
-      .flatMap((d) => d.routes)
-      .find((r) => r.id === routeId);
-    if (!route) return;
-    const generation = (generations.current[routeId] ?? 0) + 1;
-    generations.current[routeId] = generation;
-    const isCurrent = () => generations.current[routeId] === generation && latestData.current.trip.days.some(day => day.routes.some(r => r.id === routeId && routingFingerprint(r.mode, r.stops) === routingFingerprint(route.mode, route.stops)));
-    setRouteResults((prev) => ({
-      ...prev,
-      [routeId]: {
-        status: 'loading',
-      },
-    }));
-    try {
-      if (!route.stops.every(hasCoordinates)) throw new Error('含待定位地点，请先确认地点位置');
-      if (mapProvider !== 'mock' && !route.stops.every(isVerifiedPlace))
-        throw new Error('含演示或未知来源坐标，请搜索并确认高德地点');
-      const calculate = {
-        driving: mapService.calculateDrivingRoute,
-        walking: mapService.calculateWalkingRoute,
-        riding: mapService.calculateRidingRoute,
-      }[route.mode];
-      const geometry = await calculate(route.stops, isCurrent, routeSegments.current[routeId] ??= new Map());
-      if (isCurrent())
-        setRouteResults((prev) => ({ ...prev, [routeId]: { status: 'ready', geometry } }));
-    } catch (error) {
-      if (isCurrent())
-        setRouteResults((prev) => ({ ...prev, [routeId]: { status: 'error', error: error instanceof Error ? error.message : '路线规划失败' } }));
-    }
-  };
-  useEffect(() => {
-    if (!ready) return;
-    const ids = new Set(data.trip.days.flatMap(day => day.routes.map(route => route.id)));
-    for (const id of Object.keys(routeSegments.current)) if (!ids.has(id)) delete routeSegments.current[id];
-    Object.keys(fingerprints.current).filter(id => !ids.has(id)).forEach(id => {
-      generations.current[id] = (generations.current[id] ?? 0) + 1;
-      delete fingerprints.current[id];
-      delete routeSegments.current[id];
-    });
-    data.trip.days.forEach((d) =>
-      d.routes.forEach((r) => {
-        const fingerprint = routingFingerprint(r.mode, r.stops);
-        if (fingerprints.current[r.id] !== fingerprint) {
-          fingerprints.current[r.id] = fingerprint;
-          void recalculateRoute(r.id);
-        }
-      }),
-    );
-  }, [data, ready]); // Each route owns its pending calculation; stale responses are ignored.
   const expandDay = (id: string) => setExpandedDays((prev) => new Set(prev).add(id));
   const expandRoute = (id: string) => setExpandedRoutes((prev) => new Set(prev).add(id));
   const allDaysExpanded =
@@ -364,6 +262,7 @@ function usePlannerState(initialLibrary?: Promise<SavedLibrary>) {
     routeId?: string,
   ) => {
     setSelectedPlace(place);
+    setPlaceRevealRevision(value => value + 1);
     setPlaceSource(source);
     if (dayId && routeId) {
       setSelection({ activeDayId: dayId, activeRouteId: routeId, activeStopId: place.id });
@@ -372,7 +271,7 @@ function usePlannerState(initialLibrary?: Promise<SavedLibrary>) {
     }
     if (!hasCoordinates(place)) setToast('此地点尚未定位，请使用“确认地点”或搜索后替换');
   };
-  const addToRoute = (drag: DragData, dayId: string, routeId: string, index?: number) => {
+  const addToRoute = (drag: DragData, dayId: string, routeId: string, index?: number, stayMinutes?: number) => {
     commit((current) =>
       drag.type === 'stop'
         ? moveStop(
@@ -384,13 +283,13 @@ function usePlannerState(initialLibrary?: Promise<SavedLibrary>) {
               current.trip.days.flatMap((d) => d.routes).find((r) => r.id === routeId)!.stops
                 .length,
           )
-        : insertPlace(current, routeId, drag.place, index),
+        : insertPlace(current, routeId, drag.place, index, stayMinutes),
     );
     selectRoute(dayId, routeId, false);
     setDestination(null);
     setToast(drag.type === 'stop' ? '地点顺序已更新' : `已将${drag.place.name}加入行程`);
   };
-  const createRouteWithPlace = (dayId: string, drag: DragData, name = '默认路线') => {
+  const createRouteWithPlace = (dayId: string, drag: DragData, name = '默认路线', stayMinutes?: number) => {
     const day = data.trip.days.find((d) => d.id === dayId);
     if (!day) return;
     const route = newRoute(day.color, name);
@@ -407,19 +306,19 @@ function usePlannerState(initialLibrary?: Promise<SavedLibrary>) {
       next =
         drag.type === 'stop'
           ? moveStop(next, drag.routeId, route.id, drag.place.id, 0)
-          : insertPlace(next, route.id, drag.place);
+          : insertPlace(next, route.id, drag.place, undefined, stayMinutes);
       return next;
     });
     selectRoute(dayId, route.id, false);
     setDestination(null);
-    setToast('已创建路线并加入地点');
+    setToast('已加入当天行程');
   };
-  const dropOnDay = (drag: DragData, dayId: string) => {
+  const dropOnDay = (drag: DragData, dayId: string, stayMinutes?: number) => {
     const day = data.trip.days.find((d) => d.id === dayId);
     if (!day) return;
-    if (!day.routes.length) createRouteWithPlace(dayId, drag);
-    else if (day.routes.length === 1) addToRoute(drag, dayId, day.routes[0].id);
-    else setDestination({ drag, dayId });
+    const last = day.routes.filter(route => route.visible).at(-1);
+    if (last) addToRoute(drag, dayId, last.id, undefined, stayMinutes);
+    else createRouteWithPlace(dayId, drag, '默认路线', stayMinutes);
   };
   const toggleFavorite = (place: Place) => {
     const id = 'placeId' in place ? String(place.placeId) : place.id;
@@ -524,20 +423,10 @@ function usePlannerState(initialLibrary?: Promise<SavedLibrary>) {
       setToast('当前行程与导入内容相同，已保留路线结果');
       return;
     }
-    Object.keys(transferVersions.current).forEach(id => { transferVersions.current[id] += 1; });
-    transferFingerprints.current = {};
-    setTransferResults({});
     if (next.trip.id !== data.trip.id) {
       const archived = updatePlanLibrary(latestPlans.current, latestData.current);
       latestPlans.current = archived; setPlans(archived);
-      routeSegments.current = {};
-      transferSegments.current = {};
     }
-    Object.keys(generations.current).forEach((id) => {
-      generations.current[id] += 1;
-    });
-    fingerprints.current = {};
-    setRouteResults({});
     commit(() => migrateData(next));
     const day = next.trip.days[0],
       route = day?.routes[0];
@@ -661,13 +550,6 @@ function usePlannerState(initialLibrary?: Promise<SavedLibrary>) {
     selectRouteOnly: (dayId: string, routeId: string) => { setFocusedDayId(dayId); selectRoute(dayId, routeId, false); },
     toggleDay: (id: string) => setExpandedDays(prev => toggleSet(prev, id)),
     toggleRoute: (id: string) => setExpandedRoutes(prev => toggleSet(prev, id)),
-    transferResults,
-    retryTransfers: () => setTransferRetry(value => value + 1),
-    editTransfer: (dayId: string, fromRouteId: string, toRouteId: string, enabled: boolean, mode: TravelMode) => commit(current => ({
-      ...current, trip: { ...current.trip, days: current.trip.days.map(day => day.id !== dayId ? day : ({ ...day,
-        transfers: [...(day.transfers ?? []).filter(t => t.fromRouteId !== fromRouteId || t.toRouteId !== toRouteId), { fromRouteId, toRouteId, enabled, mode }],
-      })) },
-    })),
     confirmPlace: (place: Place) => {
       const stopId = selection.activeStopId;
       const routeId = selection.activeRouteId;
@@ -675,7 +557,7 @@ function usePlannerState(initialLibrary?: Promise<SavedLibrary>) {
       const old = data.trip.days.flatMap(day => day.routes).find(route => route.id === routeId)?.stops.find(stop => stop.id === stopId);
       if (!old) return;
       setDialog({ title: `替换「${old.name}」？`, description: `使用 ${place.name}（${place.address}），保留行程编号与位置，可撤销。`, onConfirm: () => {
-        commit(current => updateRoute(current, routeId, route => ({ ...route, stops: route.stops.map(stop => stop.id === stopId ? { ...place, id: stop.id, order: stop.order, placeId: place.id } : stop) })));
+        commit(current => updateRoute(current, routeId, route => ({ ...route, stops: route.stops.map(stop => stop.id === stopId ? { ...place, stayMinutes: stop.stayMinutes, startTime: stop.startTime, endTime: stop.endTime, endDayOffset: stop.endDayOffset, notes: stop.notes, id: stop.id, order: stop.order, placeId: place.id } : stop) })));
         setSelectedPlace(null);
       } });
     },
@@ -688,6 +570,7 @@ function usePlannerState(initialLibrary?: Promise<SavedLibrary>) {
     allDaysExpanded,
     toggleAllDays,
     selectedPlace,
+    placeRevealRevision,
     setSelectedPlace,
     placeSource,
     destination,
@@ -698,8 +581,7 @@ function usePlannerState(initialLibrary?: Promise<SavedLibrary>) {
     setToast,
     searchFocus,
     setSearchFocus,
-    routeResults,
-    recalculateRoute,
+    ...calculation,
     selectDay,
     selectRoute,
     openPlace,

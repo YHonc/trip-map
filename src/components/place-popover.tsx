@@ -5,17 +5,19 @@ import { IconButton } from './ui';
 import { useLayoutEffect, useRef } from 'react';
 import type { Point, Size } from '@/lib/map-geometry';
 import { hasCoordinates } from '@/lib/location';
-export function PlacePopover({ anchor, onSize, loading, error, onRetry }: { anchor: Point; onSize?: (size: Size) => void; loading?: boolean; error?: string; onRetry?: () => void }) {
+export function PlacePopover({ anchor, onSize, maxHeight, loading, error, onRetry }: { anchor: Point; onSize?: (size: Size) => void; maxHeight?: number; loading?: boolean; error?: string; onRetry?: () => void }) {
   const p = usePlanner();
   const place = p.selectedPlace;
   const ref = useRef<HTMLElement>(null);
   useLayoutEffect(() => {
     const element = ref.current;
     if (!element) return;
-    const observer = new ResizeObserver(() => {
+    const measure = () => {
       const rect = element.getBoundingClientRect();
       onSize?.({ width: rect.width, height: rect.height });
-    });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
   }, [onSize]);
@@ -27,8 +29,9 @@ export function PlacePopover({ anchor, onSize, loading, error, onRetry }: { anch
       ref={ref}
       className="place-popover glass"
       aria-label="地点详情"
-      style={{ left: anchor.x, top: anchor.y }}
+      style={{ left: anchor.x, top: anchor.y, maxHeight }}
     >
+      <div className="place-popover-content">
       <div className="place-popover-top">
         <span className="place-type">
           <MapPin size={12} />
@@ -61,6 +64,7 @@ export function PlacePopover({ anchor, onSize, loading, error, onRetry }: { anch
           <Plus size={14} />
           加入行程
         </button>
+      </div>
       </div>
       <div className="popover-tip" />
     </section>

@@ -10,7 +10,6 @@ import { buildMockRoute } from '../src/services/map-service';
 import { calculateAmapRoute } from '../src/services/amap-routing';
 import { routeAmap } from '../src/services/server/amap';
 import { POST } from '../src/app/api/amap/route/route';
-import { project } from '../src/lib/map-geometry';
 
 const a = { lng: 121.1, lat: 31.1 }, b = { lng: 121.2, lat: 31.2 };
 test('AMap POI provenance is explicit and invalid coordinates are skipped', () => {
@@ -37,14 +36,14 @@ test('legacy migration preserves original objects and marks unknown coordinates'
   assert.deepEqual(parsePlannerData(serializePlannerData(migrated)).data, migrated);
   assert.equal(migrated.trip.days[0].routes[0].stops[0].id, initialData.trip.days[0].routes[0].stops[0].id);
 });
-test('transfers skip empty routes but retain hidden endpoints and explicit pair settings', () => {
+test('separate routes never create transfers, including old enabled settings and reordering', () => {
   const day = structuredClone(initialData.trip.days[0]);
   day.routes.splice(1, 0, { ...day.routes[0], id: 'empty', stops: [] });
   day.routes[0].visible = false;
-  let result = dayConnections(day); assert.equal(result.length, 1); assert.equal(result[0].to.id, 'route-2'); assert.equal(result[0].visible, false);
-  day.transfers = [{ fromRouteId: 'route-1', toRouteId: 'route-2', enabled: false, mode: 'riding' }];
-  result = dayConnections(day); assert.equal(result[0].enabled, false); assert.equal(result[0].mode, 'riding');
-  day.routes.reverse(); result = dayConnections(day); assert.equal(result[0].from.id, 'route-2'); assert.equal(result[0].enabled, true);
+  assert.deepEqual(dayConnections(day), []);
+  day.transfers = [{ fromRouteId: 'route-1', toRouteId: 'route-2', enabled: true, mode: 'riding' }];
+  assert.deepEqual(dayConnections(day), []);
+  day.routes.reverse(); assert.deepEqual(dayConnections(day), []);
 });
 test('export uses supplied geometry only and continues numbering between routes', () => {
   const data = structuredClone(initialData);
@@ -53,24 +52,16 @@ test('export uses supplied geometry only and continues numbering between routes'
   const svg = createRouteMapSvg(data, '', { 'route-1': { status: 'ready', geometry: { source: 'amap', path: [a, b], distance: 1, duration: 1 } } });
   assert.ok(svg.includes('<polyline'));
 });
-test('export fits transfer detours and connectors and labels transfer-only AMap geometry', () => {
+test('export ignores obsolete transfer geometry for single-stop routes', () => {
   const data = structuredClone(initialData);
   data.trip.days = [data.trip.days[0]];
   data.trip.days[0].routes.forEach(route => { route.stops = route.stops.slice(0, 1); });
-  const connection = dayConnections(data.trip.days[0])[0];
   const detour = { lng: 122.2, lat: 33.2 }, connector = { lng: 120.2, lat: 30.1 };
   const geometry = { source: 'amap' as const, path: [a, detour, b], paths: [[a, detour, b]], connectors: [[b, connector]], distance: 1234, duration: 321 };
-  const svg = createRouteMapSvg(data, '', {}, { [connection.id]: { status: 'ready', geometry } });
-  assert.ok(svg.includes('高德道路几何 · 不含高德底图'));
-  assert.ok(!svg.includes('Mock 演示几何'));
-  const transform = svg.match(/<g transform="translate\(([-\d.e+]+) ([-\d.e+]+)\) scale\(([-\d.e+]+)\)">/)!;
-  assert.ok(transform);
-  const [, tx, ty, scale] = transform.map(Number);
-  for (const point of [a, detour, b, connector]) {
-    const p = project(point), x = tx + p.x * scale, y = ty + p.y * scale;
-    assert.ok(x >= 0 && x <= 1600 && y >= 0 && y <= 850, 'all supplied geometry fits within the exported map');
-  }
-  assert.ok(createRouteMapSvg(data).includes('无已就绪道路几何'));
+  const svg = createRouteMapSvg(data, '', {}, { 'old-transfer': { status: 'ready', geometry } });
+  assert.equal(svg, createRouteMapSvg(data));
+  assert.ok(svg.includes('无已就绪道路几何'));
+  assert.ok(!svg.includes('<polyline'));
 });
 test('export keeps all visit numbers visible when a POI is repeated', () => {
   const data = structuredClone(initialData);

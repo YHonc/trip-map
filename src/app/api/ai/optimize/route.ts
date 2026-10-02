@@ -1,5 +1,5 @@
 import { aiClient, localRequest, readBody, withAIBudget } from '@/services/server/ai';
-import { validateCandidate, validateOptimizationNote, type OptimizeOptions } from '@/lib/optimization';
+import { validateCandidate, validateOptimizationNote, validateOptimizationOptions, type OptimizeOptions } from '@/lib/optimization';
 import type { Route } from '@/lib/types';
 import { optimizationMessages } from '@/lib/ai-prompt';
 import { referenceExcerpts } from '@/lib/travel-references';
@@ -12,14 +12,15 @@ export async function POST(request: Request) {
     const body = await readBody(request);
     const routes = body.routes as Route[];
     const input = body.options as OptimizeOptions;
-    const options: OptimizeOptions = input && { scope: input.scope, objective: input.objective, fixedStart: input.fixedStart, fixedEnd: input.fixedEnd, lockedIds: input.lockedIds, allowRouteReorder: input.allowRouteReorder, customInstructions: validateOptimizationNote(input.customInstructions) };
-    if (!Array.isArray(routes) || !routes.length || routes.length > 8 || routes.reduce((n, r) => n + (r.stops?.length ?? 1000), 0) > 40 || !options || !['duration', 'distance'].includes(options.objective) || !['route', 'day'].includes(options.scope) || !Array.isArray(options.lockedIds) || ['fixedStart', 'fixedEnd', 'allowRouteReorder'].some(k => typeof options[k as keyof OptimizeOptions] !== 'boolean')) throw new Error('invalid input');
+    const options: OptimizeOptions = input && { scope: input.scope, objective: input.objective, fixedStart: input.fixedStart, fixedEnd: input.fixedEnd, startStopId: input.fixedStart ? input.startStopId : undefined, endStopId: input.fixedEnd ? input.endStopId : undefined, lockedIds: input.lockedIds, allowRouteReorder: input.allowRouteReorder, customInstructions: validateOptimizationNote(input.customInstructions) };
+    if (!Array.isArray(routes) || !routes.length || routes.length > 8 || routes.reduce((n, r) => n + (r.stops?.length ?? 1000), 0) > 40 || !options || !['duration', 'distance', 'custom'].includes(options.objective) || !['route', 'day'].includes(options.scope) || !Array.isArray(options.lockedIds) || ['fixedStart', 'fixedEnd', 'allowRouteReorder'].some(k => typeof options[k as keyof OptimizeOptions] !== 'boolean')) throw new Error('invalid input');
     if (options.scope === 'route' && (routes.length !== 1 || options.allowRouteReorder)) throw new Error('invalid scope');
     // Whitelist fields: never forward favorites, history or the complete saved trip.
     const minimal = routes.map(r => ({ id: r.id, mode: r.mode, stops: r.stops.map(s => ({ id: s.id, name: s.name, lng: s.lng, lat: s.lat })) }));
-    if (minimal.some(r => typeof r.id !== 'string' || !['driving', 'walking', 'riding'].includes(r.mode) || r.stops.some(s => typeof s.id !== 'string' || typeof s.name !== 'string' || s.name.length > 160 || !hasCoordinates(s)))) throw new Error('invalid stops');
+    if (minimal.some(r => typeof r.id !== 'string' || !['driving', 'walking', 'riding', 'subway'].includes(r.mode) || r.stops.some(s => typeof s.id !== 'string' || typeof s.name !== 'string' || s.name.length > 160 || !hasCoordinates(s)))) throw new Error('invalid stops');
     const ids = minimal.flatMap(r => r.stops.map(s => s.id));
     if (new Set(ids).size !== ids.length || new Set(minimal.map(r => r.id)).size !== minimal.length || new Set(options.lockedIds).size !== options.lockedIds.length || options.lockedIds.some(id => typeof id !== 'string' || !ids.includes(id))) throw new Error('invalid ids');
+    validateOptimizationOptions(routes, options);
     const references = selectedReferences(body.planId, body.referenceIds ?? []);
     const excerpts = referenceExcerpts(references, minimal.flatMap(r => r.stops.map(s => s.name)));
     return await withAIBudget(async () => {

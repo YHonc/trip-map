@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Expand, Shrink, LocateFixed, Minus, Plus } from 'lucide-react';
 import { usePlanner } from '@/hooks/use-planner';
 import { dayStopOffset } from '@/lib/planner';
-import { dayConnections } from '@/lib/connections';
 import { isVerifiedPlace } from '@/lib/location';
 import { loadAMap, lngLat, type AMapInstance, type AMapOverlay, type AMapSDK } from '@/services/amap-sdk';
 import { mapProvider, mapService } from '@/services/map-service';
@@ -17,20 +16,31 @@ import { mapPickedPlace } from '@/lib/map-pick';
 import { mapFetch } from '@/services/map-request';
 import type { Place } from '@/lib/types';
 import { bindMapPicking, type MapPick } from '@/services/map-picking';
-import { minimumPan, type Size } from '@/lib/map-geometry';
+import { minimumPan, popupMaxHeight, type Size } from '@/lib/map-geometry';
+import { MapAnnotations } from './map-annotations';
+import { useMapLayout } from '@/hooks/use-map-layout';
+import { panMapContents } from '@/services/map-pan';
 
 export function AMapView({ drawerHeight }: { drawerHeight: number }) {
   const p = usePlanner();
   const current = useRef(p); current.current = p;
   const container = useRef<HTMLDivElement>(null);
+  const layout = useMapLayout(container);
   const map = useRef<AMapInstance | null>(null);
   const [sdk, setSdk] = useState<AMapSDK | null>(null);
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
+  const [roadsVisible, setRoadsVisible] = useState(true);
+  const [connectorsVisible, setConnectorsVisible] = useState(true);
   const [tilesReady, setTilesReady] = useState(false);
+  const [annotationEditing, setAnnotationEditing] = useState(false);
+  const [annotationView, setAnnotationView] = useState(0);
   const [lookup, setLookup] = useState<{ id: string; loading: boolean; error?: string; poiId?: string } | null>(null);
-  const [popoverSize, setPopoverSize] = useState<Size>({ width: 240, height: 164 });
-  const onPopoverSize = useCallback((size: Size) => setPopoverSize(previous => previous.width === size.width && previous.height === size.height ? previous : size), []);
+  const revealKey = `${p.data.trip.id}:${p.selectedPlace?.id}:${p.placeRevealRevision}`;
+  const [popoverSize, setPopoverSize] = useState<Size & { key: string }>({ width: 240, height: 164, key: '' });
+  const onPopoverSize = useCallback((size: Size) => setPopoverSize(previous => previous.key === revealKey && previous.width === size.width && previous.height === size.height ? previous : { ...size, key: revealKey }), [revealKey]);
+  const revealAnimation = useRef({ key: '', until: 0 });
+  const maxPopoverHeight = popupMaxHeight(popoverSize.width, layout.bounds, layout.obstacles, 46);
   const lookupController = useRef<AbortController | null>(null);
   const lookupVersion = useRef(0);
   const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
@@ -105,6 +115,7 @@ export function AMapView({ drawerHeight }: { drawerHeight: number }) {
   };
   const pickRef = useRef<(pick: MapPick) => void>(() => {});
   pickRef.current = pick => {
+    if (annotationEditing) return;
     if (pick.type === 'poi') { void resolveHotspot(pick.id); return; }
     const place = mapPickedPlace(pick.coordinate);
     current.current.openPlace(place, 'searchResult');
@@ -113,6 +124,11 @@ export function AMapView({ drawerHeight }: { drawerHeight: number }) {
   useEffect(() => {
     const instance = map.current;
     if (!sdk || !instance) return;
+    if (annotationEditing) {
+      lookupController.current?.abort(); lookupVersion.current += 1; setLookup(null);
+      current.current.setSelectedPlace(null);
+      return;
+    }
     const picking = bindMapPicking(instance, pick => pickRef.current(pick));
     const escape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
@@ -121,7 +137,18 @@ export function AMapView({ drawerHeight }: { drawerHeight: number }) {
     };
     window.addEventListener('keydown', escape);
     return () => { window.removeEventListener('keydown', escape); picking.dispose(map.current === instance); };
-  }, [sdk, p.data.trip.id]);
+  }, [sdk, p.data.trip.id, annotationEditing]);
+  useEffect(() => {
+    const instance = map.current;
+    if (!sdk || !instance) return;
+    let frame = 0;
+    const update = () => { if (!frame) frame = requestAnimationFrame(() => { frame = 0; setAnnotationView(v => v + 1); }); };
+    for (const event of ['mapmove', 'zoomchange', 'resize', 'moveend', 'zoomend']) instance.on(event, update);
+    return () => {
+      cancelAnimationFrame(frame);
+      if (map.current === instance) for (const event of ['mapmove', 'zoomchange', 'resize', 'moveend', 'zoomend']) instance.off(event, update);
+    };
+  }, [sdk]);
   useEffect(() => {
     const instance = map.current;
     if (!sdk || !instance) return;
@@ -149,13 +176,13 @@ export function AMapView({ drawerHeight }: { drawerHeight: number }) {
     p.mapDays.forEach(day => day.routes.filter(route => route.visible).forEach(route => {
       const result = p.routeResults[route.id];
       if (result?.status === 'ready' && result.geometry?.path.length) {
-        for (const path of result.geometry.paths ?? [result.geometry.path]) {
+        for (const path of roadsVisible ? result.geometry.paths ?? [result.geometry.path] : []) {
           const style = routeLineStyle(p.selection.activeRouteId === route.id);
-          const line = new sdk.Polyline({ path: path.map(lngLat), strokeColor: day.color, strokeWeight: style.width, strokeOpacity: style.opacity, isOutline: true, outlineColor: style.outlineColor, borderWeight: 2, lineJoin: 'round', lineCap: 'round', zIndex: style.zIndex, bubble: false });
+          const line = new sdk.Polyline({ path: path.map(lngLat), showDir: true, strokeColor: day.color, strokeWeight: Math.max(6, style.width), strokeOpacity: style.opacity, isOutline: true, outlineColor: style.outlineColor, borderWeight: 2, lineJoin: 'round', lineCap: 'round', zIndex: style.zIndex, bubble: false });
           line.on('click', () => current.current.selectRoute(day.id, route.id, false));
           overlays.push(line);
         }
-        for (const path of result.geometry.connectors ?? [])
+        for (const path of connectorsVisible ? result.geometry.connectors ?? [] : [])
           overlays.push(new sdk.Polyline({ path: path.map(lngLat), strokeColor: '#b7a088', strokeWeight: 2, strokeStyle: 'dashed' }));
       }
       route.stops.forEach((stop, index) => {
@@ -164,21 +191,12 @@ export function AMapView({ drawerHeight }: { drawerHeight: number }) {
           () => current.current.openPlace(stop, 'planned', day.id, route.id));
       });
     }));
-    p.mapDays.flatMap(dayConnections).filter(c => c.enabled && c.visible).forEach(c => {
-      const result = p.transferResults[c.id];
-      if (result?.status === 'ready' && result.geometry) {
-        for (const path of result.geometry.paths ?? [result.geometry.path])
-          overlays.push(new sdk.Polyline({ path: path.map(lngLat), strokeColor: '#8297b0', strokeWeight: 2, strokeStyle: 'dashed' }));
-        for (const path of result.geometry.connectors ?? [])
-          overlays.push(new sdk.Polyline({ path: path.map(lngLat), strokeColor: '#b7a088', strokeWeight: 2, strokeStyle: 'dashed' }));
-      }
-    });
     p.data.favorites.filter(place => !planned.has(place.id)).forEach(place =>
       marker(place, '☆', '#7b95b7', false, () => current.current.openPlace(place, 'favorite')));
     if (p.selectedPlace && p.placeSource === 'searchResult') marker(p.selectedPlace, '●', '#237bff', true, () => {});
     instance.add(overlays); overlayRef.current = overlays;
     return () => { if (map.current === instance) instance.remove(overlays); overlayRef.current = []; };
-  }, [sdk, p.data, p.focusedDayId, p.routeResults, p.transferResults, p.selection, p.selectedPlace, p.placeSource]);
+  }, [sdk, p.data, p.focusedDayId, p.routeResults, p.selection, p.selectedPlace, p.placeSource, roadsVisible, connectorsVisible]);
   useEffect(() => {
     const instance = map.current;
     if (!sdk || !instance || !p.selectedPlace || !isVerifiedPlace(p.selectedPlace)) { setAnchor(null); return; }
@@ -187,31 +205,44 @@ export function AMapView({ drawerHeight }: { drawerHeight: number }) {
       const point = instance.lngLatToContainer(lngLat(place));
       setAnchor({ x: point.x, y: point.y - 38 });
     };
-    const point = instance.lngLatToContainer(lngLat(place));
-    const width = container.current?.clientWidth ?? 800, height = container.current?.clientHeight ?? 700;
-    const rect = container.current?.getBoundingClientRect();
-    const search = container.current?.parentElement?.parentElement?.querySelector('.place-search')?.getBoundingClientRect();
-    const obstacles = rect && search ? [{ x: search.left - rect.left - 8, y: search.top - rect.top - 8, width: search.width + 16, height: search.height + 16 }] : [];
-    const delta = minimumPan({ x: point.x - popoverSize.width / 2, y: point.y - 38 - popoverSize.height, width: popoverSize.width, height: popoverSize.height + 46 }, { x: 14, y: 14, width: width - 28, height: Math.max(0, height - drawerHeight - 42) }, obstacles);
-    // Keep a clicked landmark in place whenever the compact card already fits.
-    if (Math.abs(delta.x) > .5 || Math.abs(delta.y) > .5) instance.panBy(delta.x, delta.y);
     update();
     instance.on('mapmove', update); instance.on('zoomchange', update); instance.on('resize', update);
     return () => { if (map.current === instance) { instance.off('mapmove', update); instance.off('zoomchange', update); instance.off('resize', update); } };
-  }, [sdk, p.selectedPlace, drawerHeight, popoverSize]);
+  }, [sdk, p.selectedPlace]);
+  useEffect(() => {
+    const instance = map.current, place = p.selectedPlace;
+    if (!sdk || !instance || !place || !isVerifiedPlace(place) || popoverSize.key !== revealKey) return;
+    const wait = revealAnimation.current.key === revealKey ? Math.max(32, revealAnimation.current.until - Date.now()) : 32;
+    const timer = setTimeout(() => {
+      if (map.current !== instance) return;
+      const point = instance.lngLatToContainer(lngLat(place));
+      const delta = minimumPan({ x: point.x - popoverSize.width / 2, y: point.y - 38 - popoverSize.height, width: popoverSize.width, height: popoverSize.height + 46 }, layout.bounds, layout.obstacles);
+      if (Math.abs(delta.x) < .75 && Math.abs(delta.y) < .75) return;
+      const duration = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 320;
+      revealAnimation.current = { key: revealKey, until: Date.now() + duration + 40 };
+      panMapContents(instance, sdk, delta, duration);
+    }, wait);
+    return () => clearTimeout(timer);
+  }, [sdk, p.selectedPlace, revealKey, popoverSize, layout]);
   const unresolved = p.data.trip.days.flatMap(day => day.routes.flatMap(route => route.stops)).filter(place => !isVerifiedPlace(place)).length;
   return <div className="map-view" data-testid="map-view">
     <div ref={container} className="amap-container" />
+    {sdk && tilesReady && map.current && <MapAnnotations key={`${p.data.trip.id}:amap:${attempt}`} tripId={p.data.trip.id} provider="amap" viewRevision={annotationView}
+      project={coordinate => map.current!.lngLatToContainer(lngLat(coordinate))}
+      unproject={point => { const coordinate = map.current!.containerToLngLat(new sdk.Pixel(point.x, point.y)); return { lng: coordinate.lng, lat: coordinate.lat }; }}
+      onPan={delta => { if (map.current) panMapContents(map.current, sdk, delta); }}
+      onZoom={direction => { if (direction > 0) map.current?.zoomOut(); else map.current?.zoomIn(); }}
+      onEditingChange={setAnnotationEditing} />}
     {error ? <div className="map-provider-notice" role="alert">{error}<button onClick={() => setAttempt(n => n + 1)}>重试</button></div>
       : !tilesReady ? <div className="map-loading-overlay"><LoadingPanel compact title="正在展开地图" detail={sdk ? '正在载入城市底图' : '正在连接高德地图'} completed={sdk ? 1 : 0} total={2} /></div>
       : unresolved > 0 && <div className="map-provider-notice">{unresolved} 个地点待确认<button onClick={() => p.setRepairOpen(true)}>搜索并批量确认</button></div>}
     {lookup?.poiId && <div className="map-poi-status" role="status">{lookup.loading ? '正在读取地标信息…' : lookup.error}{!lookup.loading && <button onClick={() => lookup.poiId && void resolveHotspot(lookup.poiId)}>重试</button>}<button aria-label="取消地标查询" onClick={() => { lookupController.current?.abort(); lookupVersion.current += 1; setLookup(null); }}>关闭</button></div>}
-    {anchor && p.selectedPlace && <PlacePopover anchor={anchor} onSize={onPopoverSize} loading={lookup?.id === p.selectedPlace.id && lookup.loading} error={lookup?.id === p.selectedPlace.id ? lookup.error : undefined} onRetry={() => p.selectedPlace && void resolvePlace(p.selectedPlace)} />}
+    {anchor && p.selectedPlace && <PlacePopover anchor={anchor} onSize={onPopoverSize} maxHeight={maxPopoverHeight} loading={lookup?.id === p.selectedPlace.id && lookup.loading} error={lookup?.id === p.selectedPlace.id ? lookup.error : undefined} onRetry={() => p.selectedPlace && void resolvePlace(p.selectedPlace)} />}
     <div className="map-controls">
       <IconButton label={p.mapExpanded ? '恢复地图布局' : '展开地图'} aria-pressed={p.mapExpanded} onClick={() => p.setMapExpanded(!p.mapExpanded)}>{p.mapExpanded ? <Shrink size={19} /> : <Expand size={19} />}</IconButton>
       <IconButton label={p.currentCity ? `定位当前城市：${p.currentCity.name}` : '选择城市并定位'} onClick={p.locateCity}><LocateFixed size={21} /></IconButton>
       <div className="zoom-controls"><IconButton label="放大地图" onClick={() => map.current?.zoomIn()}><Plus size={22} /></IconButton><IconButton label="缩小地图" onClick={() => map.current?.zoomOut()}><Minus size={22} /></IconButton></div>
     </div>
-    {tilesReady && <RouteLegend bottom={drawerHeight + 28} />}
+    {tilesReady && <RouteLegend bottom={drawerHeight + 28} roadsVisible={roadsVisible} connectorsVisible={connectorsVisible} onToggleRoads={() => setRoadsVisible(v => !v)} onToggleConnectors={() => setConnectorsVisible(v => !v)} />}
   </div>;
 }

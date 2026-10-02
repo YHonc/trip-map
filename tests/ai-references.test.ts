@@ -110,7 +110,7 @@ test('optimization sends the saved custom prompt and only selected references to
     return Response.json({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ routes: [{ id: route.id, stopIds: route.stops.map(s => s.id) }], explanation: '参考 chosen.txt 安排顺序' }) } }] });
   }) as typeof fetch;
   try {
-    const response = await optimize(request('optimize', { planId: 'plan-a', referenceIds: [selected.id], routes: [route], options: { scope: 'route', objective: 'distance', fixedStart: true, fixedEnd: true, lockedIds: [], allowRouteReorder: false, customInstructions: '  先游览景点，再安排附近美食。  ' } }));
+    const response = await optimize(request('optimize', { planId: 'plan-a', referenceIds: [selected.id], routes: [route], options: { scope: 'route', objective: 'custom', fixedStart: true, fixedEnd: true, startStopId: route.stops[0].id, endStopId: route.stops.at(-1)!.id, lockedIds: [], allowRouteReorder: false, customInstructions: '  先游览景点，再安排附近美食。  ' } }));
     assert.equal(response.status, 200); assert.equal(calls, 1);
     const sent = JSON.parse(payload.messages[1].content);
     assert.equal(sent.travelPreferences, '请简短说明排序理由');

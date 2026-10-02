@@ -1,9 +1,10 @@
 import { project as projectDemo } from './map-geometry';
 import { routeLineStyle } from './route-style';
+import { routeArrows } from './route-arrows';
 import { exportMapPoint, type ExportBasemap } from './export-map';
 import { dayStopOffset } from './planner';
-import { dayConnections } from './connections';
 import { hasCoordinates } from './location';
+import { scheduleLabel, structureItinerary } from './itinerary-format';
 import type { PlannerData, RouteResult } from './types';
 
 const escapeXml = (value: string) =>
@@ -25,6 +26,7 @@ export function downloadBlob(blob: Blob, filename: string) {
 }
 /** Complete itinerary map, independent of the current pan, zoom, collapsed days, or visibility. */
 export function createRouteMapSvg(data: PlannerData, basemap: string | ExportBasemap = '', results: Record<string, RouteResult> = {}, transfers: Record<string, RouteResult> = {}): string {
+  data = structureItinerary(data);
   const raster = typeof basemap === 'object' ? basemap : undefined;
   if (raster && !/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(raster.dataUrl)) throw new Error('底图图片格式无效');
   const project = raster ? (point: Parameters<typeof projectDemo>[0]) => exportMapPoint(point, raster) : projectDemo;
@@ -35,9 +37,8 @@ export function createRouteMapSvg(data: PlannerData, basemap: string | ExportBas
   const routes = data.trip.days.flatMap((day) =>
     day.routes.map((route) => ({ day, route, geometry: results[route.id]?.status === 'ready' ? results[route.id].geometry : undefined })),
   );
-  const connections = data.trip.days.flatMap(dayConnections).filter(c => c.enabled);
-  const geometries = [...routes.map(r => r.geometry), ...connections.map(c => transfers[c.id]?.status === 'ready' ? transfers[c.id].geometry : undefined)];
-  // Include detours and non-road connectors, including transfer-only itineraries.
+  const geometries = routes.map(r => r.geometry);
+  // Include detours and non-road connectors belonging to explicit routes.
   const points = [...routes.flatMap(item => item.route.stops).filter(hasCoordinates), ...geometries.flatMap(g => g ? [...(g.paths ?? [g.path]).flat(), ...(g.connectors ?? []).flat()] : [])].map(project);
   const bounds = points.reduce((b, p) => ({ minX: Math.min(b.minX, p.x), maxX: Math.max(b.maxX, p.x), minY: Math.min(b.minY, p.y), maxY: Math.max(b.maxY, p.y) }),
     { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
@@ -51,14 +52,15 @@ export function createRouteMapSvg(data: PlannerData, basemap: string | ExportBas
     ty = raster ? 0 : mapHeight / 2 - ((minY + maxY) / 2) * scale;
   const lines = routes
     .map(({ day, geometry, route }) => {
-      if (route.stops.length < 2 || !geometry) return '';
+      if (!geometry) return '';
       return (geometry.paths ?? [geometry.path]).map(segment => {
       const path = segment
         .map(project)
         .map((p) => `${p.x},${p.y}`)
         .join(' ');
       const style = routeLineStyle();
-      return `<polyline points="${path}" fill="none" stroke="${style.outlineColor}" stroke-width="${style.casingWidth}" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"/><polyline points="${path}" fill="none" stroke="${escapeXml(day.color)}" stroke-width="${style.width}" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"/>`;
+      const arrows = routeArrows(segment.map(project), 80 / scale).map(a => `<path d="M -4 -3 L 1 0 L -4 3" transform="translate(${a.x} ${a.y}) rotate(${a.angle}) scale(${1 / scale})" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>`).join('');
+      return `<polyline points="${path}" fill="none" stroke="${style.outlineColor}" stroke-width="${style.casingWidth}" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"/><polyline points="${path}" fill="none" stroke="${escapeXml(day.color)}" stroke-width="${style.width}" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"/>${arrows}`;
       }).join('');
     })
     .join('');
@@ -78,17 +80,12 @@ export function createRouteMapSvg(data: PlannerData, basemap: string | ExportBas
     }, []);
     return `<g transform="translate(${point.x} ${point.y}) scale(${1 / scale})"><rect x="${-radius}" y="-17" width="${radius * 2}" height="34" rx="17" fill="${escapeXml(color)}" stroke="white" stroke-width="3"/><text y="6" text-anchor="middle" font-size="16" font-weight="600" fill="white">${label}</text><text font-size="13" font-weight="600" fill="#29415e" stroke="white" stroke-width="4" paint-order="stroke">${lines.map((line, index) => `<tspan x="${radius + 8}" y="${5 + (index - (lines.length - 1) / 2) * 16}">${escapeXml(line)}</tspan>`).join('')}</text></g>`;
   }).join('');
-  const connectionLines = connections.map(c => {
-    const result = transfers[c.id];
-    if (result?.status !== 'ready' || !result.geometry) return '';
-    return (result.geometry.paths ?? [result.geometry.path]).map(path => `<polyline points="${path.map(project).map(p => `${p.x},${p.y}`).join(' ')}" fill="none" stroke="#7890ad" stroke-width="2" stroke-dasharray="6 5" vector-effect="non-scaling-stroke"><title>转场</title></polyline>`).join('');
-  }).join('');
   const connectors = geometries
     .flatMap(geometry => geometry?.connectors ?? []).map(path => `<polyline points="${path.map(project).map(p => `${p.x},${p.y}`).join(' ')}" fill="none" stroke="#b7a088" stroke-width="1.5" stroke-dasharray="3 4" vector-effect="non-scaling-stroke"><title>非道路接驳，不计入路程</title></polyline>`).join('');
   const sources = new Set(geometries.filter(g => g?.path.length).map(g => g?.source));
   const sourceLabel = `${raster ? '底图 © 高德地图 · ' : ''}${sources.has('amap') ? `高德道路几何${raster ? '' : ' · 不含高德底图'}${sources.has('mock') ? ' · 含 Mock 演示几何' : ''}` : sources.has('mock') ? 'Mock 演示几何' : '无已就绪道路几何'}`;
-  const missing = routes.filter(r => r.route.stops.length > 1 && !r.geometry).length + connections.filter(c => transfers[c.id]?.status !== 'ready').length;
-  const footer = `${sourceLabel} · 虚线：转场／非道路接驳 · ${missing} 段未就绪未绘制`;
+  const missing = routes.filter(r => r.route.stops.length > 1 && !r.geometry).length;
+  const footer = `${sourceLabel} · 虚线：非道路接驳 · ${missing} 段未就绪未绘制`;
   const legend = data.trip.days
     .map((day, index) => {
       const x = 48 + (index % 5) * 302,
@@ -96,7 +93,7 @@ export function createRouteMapSvg(data: PlannerData, basemap: string | ExportBas
       return `<circle cx="${x}" cy="${y}" r="7" fill="${escapeXml(day.color)}"/><text x="${x + 17}" y="${y + 5}" font-size="14" fill="#58708e">${escapeXml(day.name)} · ${escapeXml(day.date || '日期待定')} · ${day.routes.reduce((n, r) => n + r.stops.length, 0)} 个地点</text>`;
     })
     .join('');
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><style>text{font-family:'Segoe UI','Microsoft YaHei',sans-serif}.district-labels{fill:#8293a8;font-size:21px;font-weight:600;paint-order:stroke;stroke:#fff;stroke-width:3}.street-labels{fill:#a1b1bd;font-size:9px}</style><defs><clipPath id="export-map-clip"><rect x="0" y="0" width="${width}" height="${mapHeight}"/></clipPath></defs><rect width="100%" height="100%" fill="#f6faff"/><text x="40" y="50" font-size="28" fill="#172a4b" font-weight="650">${escapeXml(data.trip.name)}</text><text x="42" y="78" font-size="13" fill="#879ab0">完整路线图 · ${data.trip.days.length} 天 · ${routes.length} 条路线 · ${escapeXml(footer)}</text><g transform="translate(0 98)" clip-path="url(#export-map-clip)"><rect width="${width}" height="${mapHeight}" fill="#eef3f2"/><g transform="translate(${tx} ${ty}) scale(${scale})">${raster ? `<image width="${width}" height="${mapHeight}" href="${raster.dataUrl}"/>` : basemap}${lines}${connectionLines}${connectors}${markers}</g></g>${legend}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><style>text{font-family:'Segoe UI','Microsoft YaHei',sans-serif}.district-labels{fill:#8293a8;font-size:21px;font-weight:600;paint-order:stroke;stroke:#fff;stroke-width:3}.street-labels{fill:#a1b1bd;font-size:9px}</style><defs><clipPath id="export-map-clip"><rect x="0" y="0" width="${width}" height="${mapHeight}"/></clipPath></defs><rect width="100%" height="100%" fill="#f6faff"/><text x="40" y="50" font-size="28" fill="#172a4b" font-weight="650">${escapeXml(data.trip.name)}</text><text x="42" y="78" font-size="13" fill="#879ab0">完整路线图 · ${data.trip.days.length} 天 · ${routes.length} 条路线 · ${escapeXml(footer)}</text><g transform="translate(0 98)" clip-path="url(#export-map-clip)"><rect width="${width}" height="${mapHeight}" fill="#eef3f2"/><g transform="translate(${tx} ${ty}) scale(${scale})">${raster ? `<image width="${width}" height="${mapHeight}" href="${raster.dataUrl}"/>` : basemap}${lines}${connectors}${markers}</g></g>${legend}</svg>`;
 }
 function loadSvg(svg: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -126,6 +123,7 @@ function wrapText(context: CanvasRenderingContext2D, text: string, maxWidth: num
   return lines.length ? lines : [''];
 }
 export async function createPlanningPng(data: PlannerData, basemap: string | ExportBasemap = '', results: Record<string, RouteResult> = {}, transfers: Record<string, RouteResult> = {}): Promise<Blob> {
+  data = structureItinerary(data);
   await document.fonts.ready;
   const canvas = document.createElement('canvas'),
     context = canvas.getContext('2d');
@@ -134,22 +132,26 @@ export async function createPlanningPng(data: PlannerData, basemap: string | Exp
     leftWidth = 590,
     gap = 44,
     dayLayouts = data.trip.days.map((day) => {
-      let height = 90;
+      context.font = '16px "Microsoft YaHei",sans-serif';
+      const dayNotes = day.notes ? wrapText(context, day.notes, leftWidth - 52) : [];
+      let height = 90 + dayNotes.length * 23;
       if (!day.routes.length) height += 44;
       const routes = day.routes.map((route) => {
+        context.font = '16px "Microsoft YaHei",sans-serif';
+        const routeNotes = [...(scheduleLabel(route) ? [`计划 ${scheduleLabel(route)}`] : []), ...(route.notes ? wrapText(context, route.notes, leftWidth - 52) : [])];
         const stops = route.stops.map((stop) => {
           context.font = '500 22px "Microsoft YaHei",sans-serif';
           const lines = wrapText(context, stop.name, leftWidth - 140);
           context.font = '16px "Microsoft YaHei",sans-serif';
-          const addressLines = stop.address ? wrapText(context, stop.address, leftWidth - 140) : [];
+          const addressLines = [scheduleLabel(stop), stop.address, stop.notes].filter(Boolean).flatMap(text => wrapText(context, text!, leftWidth - 140));
           const height = lines.length * 30 + addressLines.length * 23 + 20;
           return { stop, lines, addressLines, height };
         });
-        const routeHeight = 50 + (stops.length ? stops.reduce((n, s) => n + s.height, 0) : 34) + 14;
+        const routeHeight = 50 + (stops.length ? stops.reduce((n, s) => n + s.height, 0) : 34) + 14 + routeNotes.length * 23;
         height += routeHeight;
-        return { route, stops };
+        return { route, stops, routeNotes };
       });
-      return { day, routes, height };
+      return { day, routes, height, dayNotes };
     });
   const height = Math.max(1280, 170 + dayLayouts.reduce((n, d) => n + d.height + 18, 0) + 70);
   if (height > 16000)
@@ -174,7 +176,7 @@ export async function createPlanningPng(data: PlannerData, basemap: string | Exp
     context.font = '24px "Microsoft YaHei",sans-serif';
     context.fillText('还没有安排地点', 64, y + 55);
   }
-  for (const { day, routes, height: cardHeight } of dayLayouts) {
+  for (const { day, routes, height: cardHeight, dayNotes } of dayLayouts) {
     context.fillStyle = '#ffffff';
     context.beginPath();
     context.roundRect(gap, y, leftWidth, cardHeight, 20);
@@ -188,21 +190,24 @@ export async function createPlanningPng(data: PlannerData, basemap: string | Exp
     context.fillText(day.name, gap + 56, y + 47, leftWidth - 90);
     context.fillStyle = '#8a9cb3';
     context.font = '17px "Microsoft YaHei",sans-serif';
-    context.fillText(day.date || '日期待定', gap + 26, y + 77);
+    context.fillText([day.date || '日期待定', scheduleLabel(day)].filter(Boolean).join(' · '), gap + 26, y + 77);
     let lineY = y + 107;
+    dayNotes.forEach(line => { context.fillText(line, gap + 26, lineY, leftWidth - 52); lineY += 23; });
     if (!routes.length) {
       context.fillText('自由安排', gap + 26, lineY);
     }
-    for (const { route, stops } of routes) {
+    for (const { route, stops, routeNotes } of routes) {
       context.font = '600 20px "Microsoft YaHei",sans-serif';
       context.fillStyle = '#526a8b';
       context.fillText(
-        `${route.name} · ${{ driving: '驾车', walking: '步行', riding: '骑行' }[route.mode]}`,
+        `${route.name} · ${{ driving: '驾车', walking: '步行', riding: '骑行', subway: '地铁' }[route.mode]}`,
         gap + 26,
         lineY,
         leftWidth - 52,
       );
       lineY += 36;
+      context.font = '16px "Microsoft YaHei",sans-serif'; context.fillStyle = '#7892b0';
+      routeNotes.forEach(line => { context.fillText(line, gap + 26, lineY); lineY += 23; });
       if (!stops.length) {
         context.font = '17px "Microsoft YaHei",sans-serif';
         context.fillStyle = '#9baac0';

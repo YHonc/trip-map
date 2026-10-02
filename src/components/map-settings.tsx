@@ -5,14 +5,16 @@ import { GlassSelect } from './glass-select';
 import { usePlanner } from '@/hooks/use-planner';
 import type { PublicMapConfig, CacheKind } from '@/lib/map-config';
 import { MapUsagePanel } from './map-usage-panel';
+import { invalidateBrowserMapCache } from '@/services/map-request';
 
 type Config = PublicMapConfig & { dataDirectory: string };
 type Stats = { groups: { kind: CacheKind; entries: number; bytes: number; latest: number }[]; counters: Record<string, number>; fileBytes: number; basemap: string };
-const kinds: [CacheKind, string][] = [['city', '城市信息'], ['search', '地点搜索'], ['driving', '驾车路线'], ['walking', '步行路线'], ['riding', '骑行路线']];
+const kinds: [CacheKind, string][] = [['city', '城市信息'], ['search', '地点搜索'], ['driving', '驾车路线'], ['walking', '步行路线'], ['riding', '骑行路线'], ['subway', '地铁路线']];
 async function api(path: string, body?: unknown) {
   const response = await fetch(`/api/amap/${path}`, { method: body === undefined ? 'GET' : 'POST', headers: body === undefined ? undefined : { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body), cache: 'no-store' });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || '操作失败');
+  if (body !== undefined && (path === 'config' || path === 'cache')) invalidateBrowserMapCache();
   return result;
 }
 export function MapSettings({ onClose }: { onClose: () => void }) {
@@ -35,7 +37,8 @@ export function MapSettings({ onClose }: { onClose: () => void }) {
     setConfig(result); setWebKey(''); setSecurityCode(''); setChanged(true);
   };
   return <Modal title="地图设置" onClose={() => { if (busy) return; if (changed) void perform(reload); else onClose(); }} className="ai-dialog map-settings">
-    <div className="ai-tabs"><button className={tab === 'config' ? 'active' : ''} onClick={() => setTab('config')}>地图 API</button><button className={tab === 'cache' ? 'active' : ''} onClick={() => setTab('cache')}>缓存与数据</button><button className={tab === 'usage' ? 'active' : ''} onClick={() => setTab('usage')}>API 用量</button></div>
+    <div className="ai-tabs" role="tablist" aria-label="地图设置分类">{[['config', '地图 API'], ['cache', '缓存与数据'], ['usage', 'API 用量']].map(([value, label]) => <button key={value} role="tab" aria-selected={tab === value} aria-controls={`map-settings-${value}`} className={tab === value ? 'active' : ''} onClick={() => setTab(value)}>{label}</button>)}</div>
+    <div key={tab} className="ai-tab-panel map-settings-panel" role="tabpanel" id={`map-settings-${tab}`} aria-label={tab === 'config' ? '地图 API' : tab === 'cache' ? '缓存与数据' : 'API 用量'}>
     {tab === 'usage' && <div className="ai-form"><fieldset disabled={busy}><MapUsagePanel /></fieldset></div>}
     {config && tab !== 'usage' && <div className="ai-form"><fieldset disabled={busy}>
       {tab === 'config' ? <>
@@ -51,7 +54,7 @@ export function MapSettings({ onClose }: { onClose: () => void }) {
         <label className="cache-toggle"><input type="checkbox" checked={config.cache.enabled} onChange={e => setConfig({ ...config, cache: { ...config.cache, enabled: e.target.checked } })} />启用 SQLite 磁盘缓存（关闭程序后保留）</label>
         <label>缓存内容上限（MB）<input type="number" min="8" max="1024" value={config.cache.maxMB} onChange={e => setConfig({ ...config, cache: { ...config.cache, maxMB: Number(e.target.value) } })} /></label>
         <div className="cache-table"><div className="cache-row cache-head"><span>类别</span><span>有效期 / 分钟</span><span>有效条目</span><span>内容大小</span></div>{kinds.map(([kind, label]) => { const group = stats?.groups.find(g => g.kind === kind); return <div className="cache-row" key={kind}><label htmlFor={`ttl-${kind}`}>{label}</label><input id={`ttl-${kind}`} type="number" min="1" max="43200" value={config.cache.ttl[kind]} onChange={e => setConfig({ ...config, cache: { ...config.cache, ttl: { ...config.cache.ttl, [kind]: Number(e.target.value) } } })} /><span>{group?.entries ?? 0}</span><span>{((group?.bytes ?? 0) / 1024).toFixed(1)} KB</span></div>; })}</div>
-        <p className="ai-note">默认：城市 7 天、搜索与步行/骑行 1 天、驾车 15 分钟。请按账号的数据保存授权调整或关闭；不缓存失败结果，不代表实时路况。</p>
+        <p className="ai-note">默认保存 3 天：再次打开优先复用本机数据，到期后按需更新。地点或交通方式改变时重新计算相应路段；失败结果不会缓存。</p>
         <div className="cache-counters"><span>服务内存命中 <b>{stats?.counters.memory ?? 0}</b></span><span>磁盘命中 <b>{stats?.counters.disk ?? 0}</b></span><span>请求合并 <b>{stats?.counters.merged ?? 0}</b></span><span>缓存未命中 <b>{stats?.counters.upstream ?? 0}</b></span></div>
         <div className="ai-actions"><button onClick={() => void perform(async () => { await save(); await reload(); })}>保存缓存策略</button><button onClick={() => void perform(async () => { setStats(await api('cache')); })}>刷新统计</button><button onClick={() => void perform(async () => { if (!await p.flushSave()) throw new Error('请先保存行程'); setStats(await api('cache', {})); await reload(); })}>清空缓存并重新获取</button></div>
         <p className="ai-note">清空操作只影响地图缓存；重载后当前行程的道路会重新请求。统计不包含高德 SDK 底图请求，也不是账单。</p>
@@ -63,5 +66,6 @@ export function MapSettings({ onClose }: { onClose: () => void }) {
     </fieldset></div>}
     {changed && <button className="ai-primary" disabled={busy} onClick={() => void perform(reload)}>重新加载并应用已保存设置</button>}
     {message && <p className="ai-message" role="status">{message}</p>}
+    </div>
   </Modal>;
 }

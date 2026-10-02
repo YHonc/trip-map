@@ -31,10 +31,11 @@ export function insertPlace(
   routeId: string,
   place: Place,
   index?: number,
+  stayMinutes = 30,
 ): PlannerData {
   return updateRoute(data, routeId, (route) => {
     const stops = [...route.stops];
-    stops.splice(index ?? stops.length, 0, asStop(place, 0));
+    stops.splice(index ?? stops.length, 0, { ...asStop(place, 0), stayMinutes });
     return { ...route, stops: normalize(stops) };
   });
 }

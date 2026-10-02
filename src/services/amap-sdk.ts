@@ -10,13 +10,14 @@ export interface AMapInstance {
   getCenter(): { lng: number; lat: number };
   getZoom(): number;
   destroy(): void;
-  setCenter(coordinate: number[]): void;
+  setCenter(coordinate: number[], immediately?: boolean, duration?: number): void;
   setZoom(zoom: number): void;
   setFitView(overlays?: AMapOverlay[], immediately?: boolean, padding?: number[]): void;
   zoomIn(): void;
   zoomOut(): void;
   panBy(x: number, y: number): void;
   lngLatToContainer(coordinate: number[]): { x: number; y: number };
+  containerToLngLat(pixel: unknown): { lng: number; lat: number };
 }
 export interface AMapSDK {
   Map: new (container: HTMLElement, options: Record<string, unknown>) => AMapInstance;

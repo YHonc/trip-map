@@ -1,7 +1,8 @@
 'use client';
 import { useDraggable } from '@dnd-kit/core';
 import { useEffect, useRef, useState, type PointerEvent } from 'react';
-import { GripVertical, MapPin, Star, Trash2 } from 'lucide-react';
+import { Check, ChevronDown, ChevronUp, GripVertical, MapPin, Star, Trash2 } from 'lucide-react';
+import { samePlace } from '@/lib/favorites';
 import { Place } from '@/lib/types';
 import { usePlanner } from '@/hooks/use-planner';
 import { MoreMenu } from './ui';
@@ -155,6 +156,9 @@ export function FavoriteDrawer({ height, onHeightChange, dragging }: {
 }
 function FavoritePlaceCard({ place }: { place: Place }) {
   const p = usePlanner();
+  const assigned = p.data.trip.days.some(day => day.routes.some(route => route.stops.some(stop => samePlace(place, stop))));
+  const [details, setDetails] = useState(false);
+  useEffect(() => setDetails(false), [assigned]);
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `favorite-${place.id}`,
     data: { type: 'favorite', place },
@@ -162,13 +166,13 @@ function FavoritePlaceCard({ place }: { place: Place }) {
   return (
     <div
       ref={setNodeRef}
-      className={`favorite-card ${isDragging ? 'drag-source' : ''}`}
+      className={`favorite-card ${assigned ? 'is-assigned' : ''} ${assigned && !details ? 'is-collapsed' : ''} ${isDragging ? 'drag-source' : ''}`}
       data-testid={`favorite-${place.id}`}
       onPointerDown={(event) => {
-        if (!(event.target as Element).closest('.more-menu')) listeners?.onPointerDown?.(event);
+        if (!(event.target as Element).closest('.more-menu, .favorite-expand')) listeners?.onPointerDown?.(event);
       }}
       onClick={(event) => {
-        if (!(event.target as Element).closest('.more-menu') && !isDragging)
+        if (!(event.target as Element).closest('.more-menu, .favorite-expand') && !isDragging)
           p.openPlace(place, 'favorite');
       }}
     >
@@ -181,9 +185,10 @@ function FavoritePlaceCard({ place }: { place: Place }) {
         <GripVertical size={17} />
       </button>
       <button className="favorite-main" aria-label={`查看收藏${place.name}`}>
-        <MapPin size={25} fill={place.color ?? '#237bff'} stroke="white" strokeWidth={1.5} />
-        <strong>{place.name}</strong>
+        {assigned ? <Check size={17} className="favorite-assigned-icon" /> : <MapPin size={23} fill={place.color ?? '#237bff'} stroke="white" strokeWidth={1.5} />}
+        <span className="favorite-copy"><strong title={place.name}>{place.name}</strong>{assigned && !details ? <small>已加入行程</small> : <small title={place.address}>{place.address || place.category}</small>}</span>
       </button>
+      {assigned && <button className="favorite-expand" aria-label={`${details ? '折叠' : '展开'}收藏${place.name}`} aria-expanded={details} onClick={() => setDetails(value => !value)}>{details ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button>}
       <MoreMenu label={`收藏${place.name}操作`}>
         <button onClick={() => p.setDestination({ drag: { type: 'favorite', place } })}>
           加入行程

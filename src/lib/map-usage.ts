@@ -6,6 +6,7 @@ export const mapUsageEndpoints = {
   driving: '驾车路线',
   walking: '步行路线',
   riding: '骑行路线',
+  subway: '地铁路线',
   staticmap: '导出静态底图',
   test: 'Web 服务连接测试',
   'sdk-init': 'SDK 初始化代理',

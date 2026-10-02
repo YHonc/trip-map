@@ -14,7 +14,8 @@ test('existing JSON backups round-trip without changing data',()=>{
 test('invalid JSON and incomplete structures are rejected, empty arrays are valid',()=>{
   assert.throws(()=>parsePlannerData('{'),/JSON 格式/);
   assert.throws(()=>validatePlannerData({trip:{...initialData.trip,days:null},favorites:[]}),/trip.days/);
-  assert.throws(()=>validatePlannerData({trip:initialData.trip}),/favorites/);
+  assert.deepEqual(validatePlannerData({trip:initialData.trip}).data.favorites,[]);
+  assert.throws(()=>validatePlannerData({trip:initialData.trip,favorites:'invalid'}),/favorites/);
   assert.deepEqual(validatePlannerData({trip:{id:'empty',name:'空行程',days:[]},favorites:[]}).data.trip.days,[]);
 });
 test('duplicate stop and route identities are rejected without mutating source',()=>{

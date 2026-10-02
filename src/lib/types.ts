@@ -1,4 +1,4 @@
-export type TravelMode = 'driving' | 'walking' | 'riding';
+export type TravelMode = 'driving' | 'walking' | 'riding' | 'subway';
 export interface Coordinate {
   lng: number;
   lat: number;
@@ -17,7 +17,21 @@ export interface Place {
   category: string;
   color?: string;
 }
-export interface Stop extends Place {
+export interface Schedule {
+  startTime?: string;
+  endTime?: string;
+  /** End is on the following day; never inferred from a backwards time range. */
+  endDayOffset?: 0 | 1;
+  notes?: string;
+}
+export interface Transfer extends Schedule {
+  fromRouteId: string;
+  toRouteId: string;
+  enabled: boolean;
+  mode: TravelMode;
+}
+export interface Stop extends Place, Schedule {
+  stayMinutes?: number;
   placeId: string;
   order: number;
 }
@@ -27,7 +41,7 @@ export interface City extends Coordinate {
   provider: 'amap';
   coordinateSystem: 'GCJ-02';
 }
-export interface Route {
+export interface Route extends Schedule {
   city?: City;
   id: string;
   name: string;
@@ -36,9 +50,11 @@ export interface Route {
   color: string;
   stops: Stop[];
 }
-export interface Day {
+export interface Day extends Schedule {
+  departureTime?: string;
   city?: City;
-  transfers?: { fromRouteId: string; toRouteId: string; enabled: boolean; mode: TravelMode }[];
+  /** Legacy input only. Normalized into notes on import; never routed. */
+  transfers?: Transfer[];
   id: string;
   name: string;
   date: string;
@@ -61,6 +77,8 @@ export interface Selection {
   activeStopId: string | null;
 }
 export interface RouteGeometry {
+  /** One entry per adjacent stop pair, including zero-length journeys. */
+  legs?: { distance: number; duration: number }[];
   calculatedAt?: number;
   expiresAt?: number;
   source?: 'mock' | 'amap';

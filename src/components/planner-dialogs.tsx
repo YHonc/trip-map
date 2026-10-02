@@ -1,9 +1,10 @@
 'use client';
 import { GlassSelect } from './glass-select';
 import { useState } from 'react';
-import { ChevronRight, Map, Plus, Route as RouteIcon } from 'lucide-react';
+import { Map, Plus } from 'lucide-react';
 import { usePlanner } from '@/hooks/use-planner';
 import { Modal } from './ui';
+import { StayDuration } from './stay-duration';
 export function PlannerDialogs() {
   const p = usePlanner();
   return (
@@ -63,6 +64,7 @@ function DestinationDialog() {
     destination.dayId ?? p.selection.activeDayId ?? p.data.trip.days[0]?.id ?? '',
   );
   const day = p.data.trip.days.find((d) => d.id === dayId);
+  const [stay, setStay] = useState(30);
   return (
     <Modal title="加入行程" onClose={() => p.setDestination(null)}>
       <p className="destination-place">
@@ -73,33 +75,15 @@ function DestinationDialog() {
         选择日期
         <GlassSelect label="选择日期" value={dayId} onChange={setDayId} options={p.data.trip.days.map(d => ({ value: d.id, label: d.name, detail: d.date }))} />
       </label>
-      <div className="destination-routes">
-        {day?.routes.map((route) => (
-          <button key={route.id} onClick={() => p.addToRoute(destination.drag, day.id, route.id)}>
-            <span className="destination-route-icon" style={{ color: day.color }}>
-              <RouteIcon size={19} />
-            </span>
-            <span>
-              <strong>{route.name}</strong>
-              <small>{route.stops.length} 个地点</small>
-            </span>
-            <ChevronRight size={17} />
-          </button>
-        ))}
-      </div>
+      {destination.drag.type === 'favorite' && <StayDuration value={stay} onChange={setStay} />}
       {day ? (
         <button
           className="create-route-button"
-          onClick={() =>
-            p.createRouteWithPlace(
-              day.id,
-              destination.drag,
-              day.routes.length ? `路线 ${day.routes.length + 1}` : '默认路线',
-            )
-          }
+          disabled={!Number.isInteger(stay) || stay < 0 || stay > 1440}
+          onClick={() => p.dropOnDay(destination.drag, day.id, stay)}
         >
           <Plus size={17} />
-          {day.routes.length ? '新建路线并加入' : '创建默认路线并加入'}
+          加入当天行程
         </button>
       ) : (
         <div className="empty-day">

@@ -9,7 +9,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     localRequest(request); const value = await jsonBody(request);
-    if (value.kind !== undefined && !['city', 'search', 'driving', 'walking', 'riding'].includes(String(value.kind))) throw new Error('缓存类别无效');
+    if (value.kind !== undefined && !['city', 'search', 'driving', 'walking', 'riding', 'subway'].includes(String(value.kind))) throw new Error('缓存类别无效');
     clearMapCache(value.kind as CacheKind | undefined);
     return Response.json(cacheStats(), { headers: noStore });
   } catch (e) { return Response.json({ error: e instanceof Error ? e.message : '缓存清理失败' }, { status: 400, headers: noStore }); }

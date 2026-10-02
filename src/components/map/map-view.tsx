@@ -1,4 +1,6 @@
 'use client';
+import { connectedRoutes } from '@/lib/connected-routes';
+import { routeArrows } from '@/lib/route-arrows';
 import { routeLineStyle } from '@/lib/route-style';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Expand, Shrink, LocateFixed, Minus, Plus } from 'lucide-react';
@@ -7,16 +9,19 @@ import { Coordinate, Day, Route, Stop } from '@/lib/types';
 import { buildMockRoute, mapService, mapProvider } from '@/services/map-service';
 import { AMapView } from './amap-view';
 import { dayStopOffset } from '@/lib/planner';
-import { dayConnections } from '@/lib/connections';
 import { hasCoordinates } from '@/lib/location';
 import { Cartography } from './cartography';
 import { IconButton } from '../ui';
 import { PlacePopover } from '../place-popover';
+import { MapAnnotations } from './map-annotations';
+import { useMapLayout } from '@/hooks/use-map-layout';
 import {
   project,
   toScreen,
+  fromScreen,
   viewportScale,
   minimumPan,
+  popupMaxHeight,
   type Camera,
   type Size,
 } from '@/lib/map-geometry';
@@ -25,19 +30,40 @@ export function MapView({ drawerHeight }: { drawerHeight: number }) {
 }
 function MockMapView({ drawerHeight }: { drawerHeight: number }) {
   const p = usePlanner();
+  const onAnnotationEditing = useCallback((editing: boolean) => { if (editing) p.setSelectedPlace(null); }, [p.setSelectedPlace]);
   const [camera, setCamera] = useState<Camera>({ x: 0, y: 0, scale: 1 });
   const container = useRef<HTMLDivElement>(null);
+  const layout = useMapLayout(container);
   const [size, setSize] = useState<Size>({ width: 1200, height: 880 });
-  const [popoverSize, setPopoverSize] = useState<Size>({ width: 282, height: 184 });
+  const revealKey = `${p.data.trip.id}:${p.selectedPlace?.id}:${p.placeRevealRevision}`;
+  const [popoverSize, setPopoverSize] = useState<Size & { key: string }>({ width: 240, height: 184, key: '' });
   const cameraRef = useRef(camera);
   cameraRef.current = camera;
   const onPopoverSize = useCallback(
     (next: Size) =>
       setPopoverSize((prev) =>
-        prev.width === next.width && prev.height === next.height ? prev : next,
+        prev.key === revealKey && prev.width === next.width && prev.height === next.height ? prev : { ...next, key: revealKey },
       ),
-    [],
+    [revealKey],
   );
+  const motionFrame = useRef(0);
+  const revealAnimation = useRef({ key: '', until: 0 });
+  const stopMotion = useCallback(() => { cancelAnimationFrame(motionFrame.current); }, []);
+  useEffect(() => stopMotion, [stopMotion]);
+  const panContents = useCallback((delta: { x: number; y: number }, smooth = false) => {
+    stopMotion();
+    const start = cameraRef.current, scale = viewportScale(size);
+    const target = { ...start, x: start.x + delta.x / scale, y: start.y + delta.y / scale };
+    if (!smooth || window.matchMedia('(prefers-reduced-motion: reduce)').matches) { cameraRef.current = target; setCamera(target); return; }
+    const began = performance.now();
+    const tick = (now: number) => {
+      const progress = Math.min(1, (now - began) / 320), ease = 1 - (1 - progress) ** 3;
+      const next = { ...start, x: start.x + (target.x - start.x) * ease, y: start.y + (target.y - start.y) * ease };
+      cameraRef.current = next; setCamera(next);
+      if (progress < 1) motionFrame.current = requestAnimationFrame(tick);
+    };
+    motionFrame.current = requestAnimationFrame(tick);
+  }, [size, stopMotion]);
   useLayoutEffect(() => {
     const element = container.current;
     if (!element) return;
@@ -68,51 +94,26 @@ function MockMapView({ drawerHeight }: { drawerHeight: number }) {
       y: position.y - markerHeight * Math.sqrt(view.scale) * viewportScale(size) - 10,
     };
   };
-  useLayoutEffect(() => {
-    if (!p.selectedPlace || !hasCoordinates(p.selectedPlace) || !container.current) return;
-    const element = container.current;
-    const area = element.getBoundingClientRect();
-    const drawer = element.parentElement
-      ?.querySelector('.favorite-drawer')
-      ?.getBoundingClientRect();
-    // Use the destination height, since the panel may still be animating there.
-    const bottom = drawer ? size.height - (area.bottom - drawer.bottom) - drawerHeight - 12 : size.height - 14;
-    const obstacles = ['.place-search', '.map-controls'].flatMap((selector) => {
-      const rect = element.parentElement?.querySelector(selector)?.getBoundingClientRect();
-      return rect
-        ? [
-            {
-              x: rect.left - area.left,
-              y: selector === '.map-controls' ? size.height - drawerHeight - 44 - rect.height : rect.top - area.top,
-              width: rect.width,
-              height: rect.height,
-            },
-          ]
-        : [];
-    });
-    const view = cameraRef.current,
-      anchor = anchorFor(view),
-      point = toScreen(p.selectedPlace, view, size);
-    const delta = minimumPan(
-      {
-        x: anchor.x - popoverSize.width / 2,
-        y: anchor.y - popoverSize.height,
-        width: popoverSize.width,
-        height: point.y + 12 - (anchor.y - popoverSize.height),
-      },
-      { x: 14, y: 14, width: size.width - 28, height: Math.max(200, bottom - 14) },
-      obstacles,
-    );
-    if (Math.abs(delta.x) > 0.5 || Math.abs(delta.y) > 0.5) {
-      const scale = viewportScale(size);
-      setCamera((prev) => ({ ...prev, x: prev.x + delta.x / scale, y: prev.y + delta.y / scale }));
-    }
-    // Only reveal on selection/layout changes; ordinary map panning must remain under user control.
-  }, [p.selectedPlace, p.placeSource, size, popoverSize, drawerHeight, markerHeight]);
+  const markerGap = markerHeight * Math.sqrt(camera.scale) * viewportScale(size) + 22;
+  const maxPopoverHeight = popupMaxHeight(popoverSize.width, layout.bounds, layout.obstacles, markerGap);
+  useEffect(() => {
+    const place = p.selectedPlace;
+    if (!place || !hasCoordinates(place) || popoverSize.key !== revealKey) return;
+    const wait = revealAnimation.current.key === revealKey ? Math.max(32, revealAnimation.current.until - Date.now()) : 32;
+    const timer = setTimeout(() => {
+      const view = cameraRef.current, anchor = anchorFor(view), point = toScreen(place, view, size);
+      const delta = minimumPan({ x: anchor.x - popoverSize.width / 2, y: anchor.y - popoverSize.height, width: popoverSize.width, height: point.y + 12 - (anchor.y - popoverSize.height) }, layout.bounds, layout.obstacles);
+      if (Math.abs(delta.x) < .75 && Math.abs(delta.y) < .75) return;
+      revealAnimation.current = { key: revealKey, until: Date.now() + 360 };
+      panContents(delta, true);
+    }, wait);
+    return () => clearTimeout(timer);
+  }, [p.selectedPlace, p.placeSource, revealKey, size, popoverSize, layout, markerHeight, panContents]);
   const drag = useRef<{ x: number; y: number; camera: Camera; moved: boolean } | null>(null);
   useEffect(
     () =>
       mapService.subscribeViewport((command) => {
+        stopMotion();
         if (command.type === 'pan') {
           const point = project(command.coordinate);
           setCamera((prev) => ({
@@ -139,14 +140,16 @@ function MockMapView({ drawerHeight }: { drawerHeight: number }) {
           });
         }
       }),
-    [],
+    [stopMotion],
   );
-  const zoom = (factor: number) =>
+  const zoom = (factor: number) => {
+    stopMotion();
     setCamera((prev) => {
       const scale = Math.max(0.65, Math.min(3.2, prev.scale * factor));
       const ratio = scale / prev.scale;
       return { scale, x: 600 - (600 - prev.x) * ratio, y: 400 - (400 - prev.y) * ratio };
     });
+  };
   const plannedIds = new Set(
     p.data.trip.days.flatMap((d) =>
       d.routes.filter((r) => r.visible).flatMap((r) => r.stops.map((s) => s.placeId)),
@@ -161,6 +164,7 @@ function MockMapView({ drawerHeight }: { drawerHeight: number }) {
         aria-label="上海行程地图，可拖动平移"
         onPointerDown={(e) => {
           if ((e.target as Element).closest('[data-map-interactive]')) return;
+          stopMotion();
           e.currentTarget.setPointerCapture(e.pointerId);
           drag.current = { x: e.clientX, y: e.clientY, camera, moved: false };
         }}
@@ -196,12 +200,7 @@ function MockMapView({ drawerHeight }: { drawerHeight: number }) {
         </defs>
         <g transform={`translate(${camera.x} ${camera.y}) scale(${camera.scale})`}>
           <Cartography />
-          {p.mapDays.flatMap(dayConnections).filter(c => c.enabled && c.visible).map(c => {
-            const result = p.transferResults[c.id];
-            if (result?.status !== 'ready' || !result.geometry) return null;
-            return <polyline key={c.id} points={result.geometry.path.map(project).map(point => `${point.x},${point.y}`).join(' ')} fill="none" stroke="#8297b0" strokeWidth="2" strokeDasharray="6 5"><title>转场</title></polyline>;
-          })}
-          {p.mapDays.flatMap((day) => day.routes.filter((r) => r.visible).map((route) => ({ day, route })))
+          {p.mapDays.flatMap((day) => connectedRoutes(day).filter((r) => r.visible).map((route) => ({ day, route })))
             .sort((a, b) => Number(a.route.id === p.selection.activeRouteId) - Number(b.route.id === p.selection.activeRouteId))
             .map(({ day, route }) => <RoutePolyline key={route.id} day={day} route={route} />)}
           {p.data.favorites
@@ -255,7 +254,8 @@ function MockMapView({ drawerHeight }: { drawerHeight: number }) {
           )}
         </g>
       </svg>
-      {p.selectedPlace && <PlacePopover anchor={anchorFor(camera)} onSize={onPopoverSize} />}
+      <MapAnnotations key={`${p.data.trip.id}:mock`} tripId={p.data.trip.id} provider="mock" viewRevision={`${camera.x}:${camera.y}:${camera.scale}:${size.width}:${size.height}`} project={coordinate => toScreen(coordinate, camera, size)} unproject={point => fromScreen(point, camera, size)} onEditingChange={onAnnotationEditing} onPan={delta => panContents(delta)} onZoom={direction => zoom(direction > 0 ? .94 : 1.06)} />
+      {p.selectedPlace && <PlacePopover anchor={anchorFor(camera)} onSize={onPopoverSize} maxHeight={maxPopoverHeight} />}
       <div className="map-controls">
         <IconButton label={p.mapExpanded ? '恢复地图布局' : '展开地图'} aria-pressed={p.mapExpanded} onClick={() => p.setMapExpanded(!p.mapExpanded)}>
           {p.mapExpanded ? <Shrink size={19} /> : <Expand size={19} />}
@@ -337,6 +337,7 @@ function RoutePolyline({ day, route }: { day: Day; route: Route }) {
         strokeLinejoin="round"
         filter={active ? 'url(#route-glow)' : undefined}
       />
+      <g className="route-direction-arrows" aria-hidden="true" pointerEvents="none">{routeArrows(geometry.path.map(project)).map((arrow, index) => <path key={index} d="M -4 -3 L 1 0 L -4 3" transform={`translate(${arrow.x} ${arrow.y}) rotate(${arrow.angle})`} fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />)}</g>
     </g>
   );
 }

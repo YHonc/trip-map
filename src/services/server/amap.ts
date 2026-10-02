@@ -20,11 +20,14 @@ function reuse<T>(fetcher: typeof fetch, key: string, run: () => Promise<T>): Pr
   if (!cache) { cache = new RequestCache(256, 60_000); caches.set(fetcher, cache); }
   return cache.get(`${process.env.AMAP_WEB_KEY}:${key}`, async () => ({ value: await run() })).then(r => r.value as T);
 }
-export function routeAmap(origin: Coordinate, destination: Coordinate, mode: TravelMode, fetcher: typeof fetch = fetch) {
+export function routeAmap(origin: Coordinate, destination: Coordinate, mode: TravelMode, fetcher: typeof fetch = fetch, city?: string) {
+  if (mode === 'subway' && (typeof city !== 'string' || !city.trim() || city.length > 80 || /[\x00-\x1f]/.test(city))) throw new Error('请先为当天或路线选择城市，再计算地铁路线');
+  city = mode === 'subway' ? city?.trim() : undefined;
   const config = readMapConfig();
-  const run = () => routeUncached(origin, destination, mode, fetcher, config);
+  const run = () => routeUncached(origin, destination, mode, fetcher, config, city);
   const point = (p: Coordinate) => p && [Number(p.lng?.toFixed?.(6)), Number(p.lat?.toFixed?.(6))];
-  return fetcher !== fetch ? reuse(fetcher, JSON.stringify(['route', origin, destination, mode]), run) : cachedMap(mode, [point(origin), point(destination)], config, run);
+  const routeKey = [point(origin), point(destination), ...(mode === 'subway' ? [city] : [])];
+  return fetcher !== fetch ? reuse(fetcher, JSON.stringify(['route', mode, routeKey]), run) : cachedMap(mode, routeKey, config, run);
 }
 export function searchAmap(keyword: string, fetcher: typeof fetch = fetch, city?: string) {
   if (!keyword.trim() || keyword.length > 100) throw new Error('搜索词应为 1–100 个字符');
@@ -71,10 +74,10 @@ export function reverseAmap(point: Coordinate, fetcher: typeof fetch = fetch): P
   return fetcher !== fetch ? reuse(fetcher, JSON.stringify(['regeo', location]), run) : cachedMap('search', ['regeo', location], config, run);
 }
 
-async function routeUncached(origin: Coordinate, destination: Coordinate, mode: TravelMode, fetcher: typeof fetch, config: MapConfig) {
+async function routeUncached(origin: Coordinate, destination: Coordinate, mode: TravelMode, fetcher: typeof fetch, config: MapConfig, city?: string) {
   for (const point of [origin, destination])
     if (!point || typeof point.lng !== 'number' || typeof point.lat !== 'number' || !Number.isFinite(point.lng) || !Number.isFinite(point.lat) || Math.abs(point.lng) > 180 || Math.abs(point.lat) > 90) throw new Error('无效的路线坐标');
-  const paths = { driving: 'v3/direction/driving', walking: 'v3/direction/walking', riding: 'v4/direction/bicycling' };
+  const paths = { driving: 'v3/direction/driving', walking: 'v3/direction/walking', riding: 'v4/direction/bicycling', subway: 'v3/direction/transit/integrated' };
   if (!Object.hasOwn(paths, mode)) throw new Error('不支持的交通方式');
   const key = config.webKey;
   if (!key) throw new Error('未配置 AMAP_WEB_KEY');
@@ -83,6 +86,7 @@ async function routeUncached(origin: Coordinate, destination: Coordinate, mode: 
   const url = new URL(`${config.baseURL}/${paths[mode]}`);
   const coordinate = (p: Coordinate) => `${p.lng.toFixed(6)},${p.lat.toFixed(6)}`;
   url.search = new URLSearchParams({ key, origin: coordinate(origin), destination: coordinate(destination), output: 'JSON' }).toString();
+  if (mode === 'subway') { url.searchParams.set('city', city!); url.searchParams.set('cityd', city!); url.searchParams.set('strategy', '0'); url.searchParams.set('extensions', 'all'); }
   markUpstreamRequest(mode);
   const response = await fetcher(url, { signal: AbortSignal.timeout(10_000), cache: 'no-store', redirect: 'error' });
   if (!response.ok) throw new Error('高德规划服务暂不可用');

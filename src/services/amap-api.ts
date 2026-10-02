@@ -1,6 +1,7 @@
 import type { Place, Coordinate, RouteGeometry, TravelMode } from '@/lib/types';
 
 export function parseAmapRoute(value: unknown, mode: TravelMode, origin: Coordinate, destination: Coordinate): RouteGeometry {
+  if (mode === 'subway') return parseSubwayRoute(value, origin, destination);
   const data = value as { status?: string; errcode?: number; infocode?: string; route?: { paths?: unknown[] }; data?: { paths?: unknown[] } };
   if (mode === 'riding' ? data.errcode !== 0 : data.status !== '1')
     throw new Error(`高德规划失败（${data.infocode ?? data.errcode ?? '未知错误'}）`);
@@ -22,6 +23,44 @@ export function parseAmapRoute(value: unknown, mode: TravelMode, origin: Coordin
   join(origin, path[0]); join(path.at(-1)!, destination);
   paths.slice(1).forEach((p, i) => join(paths[i].at(-1)!, p[0]));
   return { source: 'amap', path, paths, connectors, distance, duration };
+}
+
+/** Only subway legs and their walking access/transfer legs may be labelled 地铁. */
+function parseSubwayRoute(value: unknown, origin: Coordinate, destination: Coordinate): RouteGeometry {
+  type Line = { type?: string; distance?: unknown; polyline?: string };
+  type Segment = { walking?: { distance?: unknown; steps?: { polyline?: string }[] }; bus?: { buslines?: Line[] }; railway?: Record<string, unknown>; taxi?: Record<string, unknown> };
+  const data = value as { status?: string; infocode?: string; route?: { transits?: { duration?: unknown; segments?: Segment[] }[] } };
+  if (data?.status !== '1') throw new Error(`高德规划失败（${data?.infocode ?? '未知错误'}）`);
+  const candidates: RouteGeometry[] = [];
+  for (const transit of data.route?.transits ?? []) {
+    try {
+      if (!Array.isArray(transit.segments) || !transit.segments.length) continue;
+      let distance = 0, subwayLegs = 0;
+      const steps: { polyline?: string }[] = [];
+      const meters = (v: unknown) => { if ((typeof v !== 'string' && typeof v !== 'number') || v === '' || !Number.isFinite(Number(v)) || Number(v) < 0) throw new Error('invalid distance'); return Number(v); };
+      for (const segment of transit.segments) {
+        if (Object.keys(segment.railway ?? {}).length || Object.keys(segment.taxi ?? {}).length) throw new Error('not subway');
+        const walking = segment.walking;
+        if (walking && Object.keys(walking).length) {
+          const length = meters(walking.distance);
+          if (length > 0 && !walking.steps?.some(step => step.polyline)) throw new Error('missing walking path');
+          distance += length; steps.push(...(walking.steps ?? []));
+        }
+        const lines = segment.bus?.buslines ?? [];
+        if (lines.length) {
+          const line = lines.find(line => line.type === '地铁线路');
+          if (!line?.polyline) throw new Error('not subway');
+          subwayLegs++; distance += meters(line.distance); steps.push({ polyline: line.polyline });
+        }
+      }
+      if (!subwayLegs) continue;
+      const duration = meters(transit.duration);
+      candidates.push(parseAmapRoute({ status: '1', route: { paths: [{ distance, duration, steps }] } }, 'walking', origin, destination));
+    } catch { /* Skip incomplete routes and routes that require buses or trains. */ }
+  }
+  const best = candidates.sort((a, b) => a.duration - b.duration)[0];
+  if (!best) throw new Error('未找到可用的地铁路线（含步行接驳），请检查城市或选择其他交通方式');
+  return best;
 }
 
 export function parseAmapPlaces(value: unknown): Place[] {

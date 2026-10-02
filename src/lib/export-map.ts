@@ -1,5 +1,4 @@
 import type { Coordinate, PlannerData, RouteResult } from './types';
-import { dayConnections } from './connections';
 import { hasCoordinates } from './location';
 
 export const EXPORT_MAP_WIDTH = 1600;
@@ -22,7 +21,7 @@ export function exportMapPoint(point: Coordinate, viewport: ExportViewport) {
 }
 export function exportViewport(data: PlannerData, results: Record<string, RouteResult> = {}, transfers: Record<string, RouteResult> = {}): ExportViewport {
   const routes = data.trip.days.flatMap(day => day.routes);
-  const geometries = [...routes.map(route => results[route.id]), ...data.trip.days.flatMap(dayConnections).filter(c => c.enabled).map(c => transfers[c.id])]
+  const geometries = routes.map(route => results[route.id])
     .flatMap(result => result?.status === 'ready' && result.geometry ? [result.geometry] : []);
   const points: Coordinate[] = [...routes.flatMap(route => route.stops).filter(hasCoordinates), ...geometries.flatMap(g => [...(g.paths ?? [g.path]).flat(), ...(g.connectors ?? []).flat()])];
   if (!points.length) {

@@ -6,7 +6,7 @@ export type SelectOption = { value: string; label: string; detail?: string; disa
 export function GlassSelect({ label, value, options, onChange, disabled, placeholder = '请选择' }: {
   label: string; value: string; options: SelectOption[]; onChange: (value: string) => void; disabled?: boolean; placeholder?: string;
 }) {
-  return <Select.Root value={value || undefined} onValueChange={onChange} disabled={disabled}>
+  return <Select.Root value={value} onValueChange={onChange} disabled={disabled}>
     <Select.Trigger className="glass-select-trigger" aria-label={label}><Select.Value placeholder={placeholder} /><Select.Icon><ChevronDown size={16} /></Select.Icon></Select.Trigger>
     <Select.Portal><Select.Content className="glass-select-content" position="popper" sideOffset={7} collisionPadding={16}>
       <Select.ScrollUpButton className="glass-select-scroll"><ChevronUp size={15} /></Select.ScrollUpButton>

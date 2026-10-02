@@ -22,6 +22,7 @@ function db() {
 }
 function count(name: string) { db().prepare('INSERT INTO counters(name,value) VALUES (?,1) ON CONFLICT(name) DO UPDATE SET value=value+1').run(name); }
 function epoch() { return (db().prepare("SELECT value FROM metadata WHERE key='epoch'").get() as { value: string }).value; }
+export function mapCacheEpoch() { return epoch(); }
 function prune(maxBytes: number) {
   db().prepare('DELETE FROM entries WHERE expires_at<=?').run(Date.now());
   let bytes = (db().prepare('SELECT COALESCE(SUM(bytes),0) AS bytes FROM entries').get() as { bytes: number }).bytes;
@@ -37,7 +38,7 @@ export async function cachedMap<T>(kind: CacheKind, parameters: unknown, config:
   const now = Date.now();
   const unpack = (entry: Entry, source: string) => {
     markCacheResult(source, entry.fetchedAt);
-    if (kind === 'driving' || kind === 'walking' || kind === 'riding') return { ...(entry.value as object), calculatedAt: entry.fetchedAt, expiresAt: entry.expiresAt } as T;
+    if (kind === 'driving' || kind === 'walking' || kind === 'riding' || kind === 'subway') return { ...(entry.value as object), calculatedAt: entry.fetchedAt, expiresAt: entry.expiresAt } as T;
     return structuredClone(entry.value) as T;
   };
   if (retention) {
