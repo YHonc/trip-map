@@ -1,0 +1,1 @@
+{"path":"Start-TripMap.cmd","language":"text","content":"@echo off\nsetlocal\nchcp 65001 >nul\ntitle TripMap - Desktop\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File \"%~dp0scripts\\start-desktop.ps1\" %*\nset \"RESULT=%errorlevel%\"\nif not \"%RESULT%\"==\"0\" pause\nexit /b %RESULT%\n","sizeBytes":223,"lineCount":9}

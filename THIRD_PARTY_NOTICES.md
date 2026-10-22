@@ -36,6 +36,12 @@ TripMap 的 MIT License 适用于本项目原创代码与文档，不替代第�
 
 `openai` npm 包是采用 Apache-2.0 的客户端库。使用 OpenAI 或其他兼容 API 服务仍需遵守实际服务商条款，并自行配置账号、密钥及模型；SDK 的开源许可不授予服务访问权。用户选择的路线信息会发送给配置的服务商。
 
+## 项目地图查看器
+
+`docs/project-map/` 使用 [Understand-Anything](https://github.com/Egonex-AI/Understand-Anything) 的静态 dashboard（包声明 2.9.7，上游提交 `b8c807c632743ab695ec43cb654a0f1efe216bc8`），并适配相对资源路径、中文标题和已提交源码预览。
+
+保留其 [MIT 许可与版权声明](docs/project-map/UNDERSTAND-ANYTHING-LICENSE.txt)及 [安装依赖的许可证和通知](docs/project-map/THIRD-PARTY-LICENSES.txt)。构建来源与更新方式见 [地图维护说明](docs/project-map-guide.md)。
+
 ## 名称与商标
 
 第三方名称用于说明兼容性与依赖关系，不表示这些权利人对 TripMap 的认可或担保。

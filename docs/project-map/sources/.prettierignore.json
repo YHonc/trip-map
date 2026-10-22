@@ -1,0 +1,1 @@
+{"path":".prettierignore","language":"text","content":".next\nnode_modules\nartifacts\n.playwright-cli\n# Playwright CLI expects an expression with no trailing semicolon.\nscripts/browser-*.js\nscripts/capture-preview.js\n","sizeBytes":160,"lineCount":8}

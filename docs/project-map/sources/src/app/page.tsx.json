@@ -1,0 +1,1 @@
+{"path":"src/app/page.tsx","language":"tsx","content":"import { TripPlannerPage } from '@/components/trip-planner';\nexport default function Page() {\n  return <TripPlannerPage />;\n}\n","sizeBytes":126,"lineCount":5}
