@@ -6,7 +6,7 @@
 
 在地图上安排多日旅行：收集地点、调整顺序、计算路程，再把行程带走。
 
-[下载使用](https://github.com/YHonc/trip-map/releases/latest) · [交互项目地图](https://yhonc.github.io/trip-map/project-map/) · [开发指南](docs/development-guide.md) · [反馈问题](https://github.com/YHonc/trip-map/issues)
+[下载使用](https://github.com/YHonc/trip-map/releases/latest) · [开发指南](docs/development-guide.md) · [反馈问题](https://github.com/YHonc/trip-map/issues)
 
 </div>
 
@@ -65,17 +65,33 @@ TripMap 是一款本地旅行规划应用。左侧按天整理地点与时间，
 
 计划、攻略和连接配置保存在本机，默认目录为 `%LOCALAPPDATA%\TripMap`；地图视角和批注等浏览偏好保存在当前浏览器。换电脑时按 [备份与迁移说明](桌面版使用说明.md#数据与缓存)操作。
 
-## 交互项目地图
+## 实现原理
 
-**[打开 TripMap 项目地图 →](https://yhonc.github.io/trip-map/project-map/)**
+TripMap 采用 **React 编辑界面 + Next.js 本机服务 + SQLite 存储**。浏览器与桌面版使用同一套业务逻辑；Electron 负责窗口和进程管理，独立 Node 进程运行本机服务。
 
-想了解代码从哪里开始读，可以直接浏览由 **Understand-Anything** 生成的中文项目地图：
+1. **统一行程状态。** 将旅行组织为「计划 → 日期 → 路线 → 地点到访」，侧栏和地图读取同一份状态；拖拽、编辑和撤销重做都围绕这份数据更新。
+2. **自动保存到本机。** 编辑后通过计划 API 保存到 SQLite，服务端校验修订号并在事务中更新，避免多个窗口互相覆盖；地图视角、选择状态和批注另存于浏览器。
+3. **按需计算道路与时间。** 点击「计算行程」后，按当天可见地点派生连续路段，优先复用有效缓存，再请求高德道路数据。结合出发时间和停留时长推算到达、离开时间；计算期间行程发生变化时，不应用旧结果。
+4. **AI 提建议，程序做核验。** 将地点、排序约束和选中的攻略片段交给配置的模型，校验候选是否保留地点及起终点规则，再核算前后道路成本。用户预览确认后应用；期间编辑过的行程需重新生成建议。
+5. **从同一份行程生成分享内容。** JSON 导出保留行程结构；PNG / SVG 导出将路线、地点与高德静态底图组合，生成可直接查看的规划图。交互底图由浏览器中的高德 JS SDK 加载。
 
-- 按架构分层查看界面、状态管理、行程规则、地图服务、AI、存储和桌面分发。
-- 搜索文件或函数，查看职责、依赖关系与源码。
-- 跟随中文导览，从页面入口走到计划保存、道路计算和 AI 建议。
+```mermaid
+flowchart LR
+    UI["浏览器 / Electron 界面"] --> State["行程状态与编辑历史"]
+    State -->|自动保存| Store["计划 API · 修订校验"]
+    Store --> DB[("本机 SQLite")]
+    State -->|点击计算| Calc["连续路段与预计时间"]
+    Calc <-->|道路距离与耗时| Map["地图服务与分层缓存"]
+    Map <-->|未命中时请求| AMap["高德 Web 服务"]
+    Calc -->|更新展示| UI
+    State -->|地点、约束与攻略| AI["本机 AI 接口"]
+    AI <-->|生成顺序候选| Model["OpenAI 兼容服务"]
+    AI --> Preview["候选校验与预览"]
+    Map -->|核算道路成本| Preview
+    Preview -->|用户确认后应用| State
+```
 
-地图是独立的静态网页，打开即可浏览，无需安装技能或配置 API Key。[地图数据](.ua/knowledge-graph.json)与网页一同保存在本仓库；生成来源、版本和更新方式见 [地图维护说明](docs/project-map-guide.md)。
+核心入口为 [行程状态管理](src/hooks/use-planner.tsx)、[行程计算](src/hooks/use-itinerary-calculation.ts)和 [AI 候选校验](src/lib/optimization.ts)。模块职责、数据契约与验证方式见 [总体开发指南](docs/development-guide.md)。
 
 ## 从源码开发
 

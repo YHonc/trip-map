@@ -1,1 +1,0 @@
-{"path":"desktop/app/package.json","language":"json","content":"{\n  \"name\": \"trip-map-desktop\",\n  \"version\": \"1.4.0\",\n  \"description\": \"多日行程地图 · 本机桌面与网页应用\",\n  \"author\": \"Trip Map\",\n  \"main\": \"main.cjs\",\n  \"private\": true,\n  \"license\": \"MIT\",\n  \"dependencies\": {\n    \"electron-log\": \"^5.4.3\"\n  }\n}\n","sizeBytes":264,"lineCount":13}

@@ -1,1 +1,0 @@
-{"path":"Start-TripMap-Dev.cmd","language":"text","content":"@echo off\nsetlocal\nchcp 65001 >nul\ntitle TripMap - Local Development\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File \"%~dp0scripts\\start-dev.ps1\" %*\nset \"RESULT=%errorlevel%\"\necho.\nif \"%RESULT%\"==\"0\" exit /b 0\necho 调试启动失败。按任意键关闭窗口。\npause >nul\nexit /b %RESULT%\n","sizeBytes":300,"lineCount":12}

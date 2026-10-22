@@ -28,12 +28,7 @@ CLAUDE.md
 /docs/offline-basemap-plan.md
 /scripts/desktop-shortcuts/
 
-# Project-local analysis tools and scratch data (publish only reviewed maps)
+# Project-local analysis tools and generated data
 /.tools/
 /.agents/
-/.ua/intermediate/
-/.ua/tmp/
-/.ua/.trash-*/
-/.ua/fingerprints.json
-/.ua/meta.json
-/.ua/validation.json
+/.ua/

@@ -1,1 +1,0 @@
-{"path":"postcss.config.mjs","language":"javascript","content":"export default { plugins: { '@tailwindcss/postcss': {} } };\n","sizeBytes":60,"lineCount":2}
